@@ -1,0 +1,56 @@
+import type { IncomingMessage, ServerResponse } from 'http'
+
+export interface Adapter {
+  name: string
+  extensions: string[]
+  render: (options: {
+    page: string
+    component: any
+    loadData: Record<string, unknown>
+    req: IncomingMessage
+    res: ServerResponse
+  }) => string | Promise<string>
+}
+
+export interface Route {
+  path: string
+  pattern: RegExp
+  paramNames: string[]
+  filePath: string
+  type: 'page' | 'api'
+}
+
+export interface RouteManifest {
+  pages: Route[]
+  apis: Route[]
+}
+
+export interface VitellaConfig {
+  middleware?: Array<
+    (req: IncomingMessage, res: ServerResponse, next: () => Promise<void>) => void | Promise<void>
+  >
+  appShell?: string
+  adapter?: Adapter
+  pagesDir?: string
+  serverDir?: string
+}
+
+export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH'
+
+export interface ApiHandlerModule {
+  get?: (req: IncomingMessage, res: ServerResponse, params: Record<string, string>) => Promise<{ status: number; body: unknown }> | { status: number; body: unknown }
+  post?: (req: IncomingMessage, res: ServerResponse, params: Record<string, string>) => Promise<{ status: number; body: unknown }> | { status: number; body: unknown }
+  put?: (req: IncomingMessage, res: ServerResponse, params: Record<string, string>) => Promise<{ status: number; body: unknown }> | { status: number; body: unknown }
+  del?: (req: IncomingMessage, res: ServerResponse, params: Record<string, string>) => Promise<{ status: number; body: unknown }> | { status: number; body: unknown }
+  patch?: (req: IncomingMessage, res: ServerResponse, params: Record<string, string>) => Promise<{ status: number; body: unknown }> | { status: number; body: unknown }
+}
+
+export interface BuildManifest {
+  pages: Record<string, {
+    clientEntry: string
+    serverEntry: string
+  }>
+  apis: Record<string, {
+    serverEntry: string
+  }>
+}

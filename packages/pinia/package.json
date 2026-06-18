@@ -1,0 +1,33 @@
+{
+  "name": "@vitella-ssr/pinia",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "dev": "vitest"
+  },
+  "peerDependencies": {
+    "@vitella-ssr/core": "^0.1.0",
+    "@vitella-ssr/vue": "^0.1.0",
+    "pinia": "3.0.4",
+    "vue": "3.5.38"
+  },
+  "devDependencies": {
+    "@vitella-ssr/core": "*",
+    "@vitella-ssr/vue": "*",
+    "pinia": "3.0.4",
+    "vue": "3.5.38",
+    "vitest": "4.1.9",
+    "@types/node": "25.9.3"
+  }
+}
