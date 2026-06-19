@@ -56,7 +56,6 @@ describe('createProdServer', () => {
     const secretFile = join(tmpDir, 'secret.txt')
     writeFileSync(secretFile, 'sensitive data')
 
-    // Use http.get with raw path to bypass fetch() URL normalization
     const res = await new Promise<http.IncomingMessage>((resolve, reject) => {
       const req = http.get(
         { hostname: 'localhost', port, path: '/../../secret.txt' },
@@ -66,6 +65,78 @@ describe('createProdServer', () => {
     })
 
     expect(res.statusCode).toBe(403)
+  })
+})
+
+describe('createProdServer with CSS links and scripts', () => {
+  let tmpDir: string
+  let server: http.Server
+  const port = 9878
+
+  beforeAll(async () => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'vitella-css-'))
+    const distDir = join(tmpDir, 'dist')
+    mkdirSync(distDir, { recursive: true })
+    mkdirSync(join(distDir, 'client'), { recursive: true })
+    mkdirSync(join(distDir, 'server'), { recursive: true })
+
+    // Write a server module that renders HTML directly
+    writeFileSync(join(distDir, 'server', 'index.js'), `
+export default {
+  render: () => "<div>hello</div>"
+}
+`)
+
+    // Write app shell
+    const appShell = join(tmpDir, 'app.html')
+    writeFileSync(appShell, '<html><head><!--vitella-head--></head><body><!--vitella-html--><!--vitella-scripts--></body></html>')
+
+    // Write manifest with CSS and client entry
+    const manifest = {
+      pages: {
+        '/': { clientEntry: 'assets/index.js', serverEntry: 'server/index.js', css: ['assets/style.css'] },
+      },
+      apis: {},
+    }
+    writeFileSync(join(distDir, 'manifest.json'), JSON.stringify(manifest))
+
+    // Write routes
+    writeFileSync(join(distDir, 'routes.json'), JSON.stringify({
+      pages: [{ path: '/', paramNames: [], type: 'page' }],
+      apis: [],
+    }))
+
+    const config = {
+      appShell,
+      adapter: {
+        name: 'test',
+        extensions: ['.js'],
+        render: async () => '<div>hello</div>',
+        getClientEntry: () => 'import { createSSRApp } from "vue"',
+      },
+    }
+
+    server = await createProdServer({ distDir, appShell, manifest, config: config as any })
+    await new Promise<void>(resolve => server.listen(port, resolve))
+  })
+
+  afterAll(async () => {
+    await new Promise(resolve => server.close(resolve))
+    rmSync(tmpDir, { recursive: true, force: true })
+  })
+
+  it('injects CSS links from manifest', async () => {
+    const res = await fetch(`http://localhost:${port}/`)
+    const text = await res.text()
+    expect(text).toContain('assets/style.css')
+    expect(text).toContain('<link rel="stylesheet"')
+  })
+
+  it('injects client entry script when adapter provides getClientEntry', async () => {
+    const res = await fetch(`http://localhost:${port}/`)
+    const text = await res.text()
+    expect(text).toContain('assets/index.js')
+    expect(text).toContain('<script')
   })
 })
 

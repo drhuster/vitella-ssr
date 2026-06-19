@@ -4,7 +4,7 @@ import path from 'path'
 import { matchRoute } from './route-matcher.js'
 import { runMiddleware } from './middleware-chain.js'
 import { loadHtmlShell, renderHtmlShell } from './html-shell.js'
-import type { BuildManifest, Route, ApiHandlerModule } from './types.js'
+import type { AdapterRenderResult, BuildManifest, Route, ApiHandlerModule } from './types.js'
 import type { ResolvedVitellaConfig } from './config.js'
 
 interface RouteData {
@@ -31,6 +31,10 @@ function deserializeRoutes(data: { pages: RouteData[]; apis: RouteData[] }): { p
     ),
   })
   return { pages: data.pages.map(toRoute), apis: data.apis.map(toRoute) }
+}
+
+function isStructuredResult(result: any): result is AdapterRenderResult {
+  return typeof result === 'object' && result !== null && typeof result.html === 'string'
 }
 
 export interface ProdServerOptions {
@@ -143,14 +147,50 @@ export async function createProdServer(options: ProdServerOptions): Promise<http
             }
 
             if (config?.adapter && mod.default) {
-              const renderResult = await config.adapter.render({
+              const raw = await config.adapter.render({
                 page: url,
                 component: mod.default,
                 loadData,
                 req,
                 res,
               })
-              html = typeof renderResult === 'string' ? renderResult : renderResult.html
+              const html = isStructuredResult(raw) ? raw.html : raw
+              const title = isStructuredResult(raw) ? raw.title : undefined
+              const headParts: string[] = []
+
+              if (isStructuredResult(raw) && raw.head) {
+                headParts.push(raw.head)
+              }
+
+              const cssLinks = (entry?.css || [])
+                .map((f: string) => `<link rel="stylesheet" href="/${f}">`)
+                .join('\n  ')
+              if (cssLinks) {
+                headParts.push(cssLinks)
+              }
+
+              const scripts: string[] = []
+              if (config?.adapter?.getClientEntry && entry?.clientEntry) {
+                scripts.push(`/${entry.clientEntry}`)
+              }
+
+              try {
+                const template = loadHtmlShell(appShell)
+                const fullHtml = renderHtmlShell(template, {
+                  html,
+                  title,
+                  head: headParts.length > 0 ? headParts.join('\n  ') : undefined,
+                  state: Object.keys(loadData).length > 0 ? loadData : undefined,
+                  scripts: scripts.length > 0 ? scripts : undefined,
+                })
+                res.setHeader('Content-Type', 'text/html')
+                res.end(fullHtml)
+                return
+              } catch {
+                res.setHeader('Content-Type', 'text/html')
+                res.end(html)
+                return
+              }
             } else if (typeof mod.default === 'function') {
               html = mod.default(loadData)
             } else {
