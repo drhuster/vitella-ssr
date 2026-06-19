@@ -1,5 +1,11 @@
 import type { IncomingMessage, ServerResponse } from 'http'
 
+export interface AdapterRenderResult {
+  html: string
+  head?: string
+  title?: string
+}
+
 export interface Adapter {
   name: string
   extensions: string[]
@@ -9,7 +15,8 @@ export interface Adapter {
     loadData: Record<string, unknown>
     req: IncomingMessage
     res: ServerResponse
-  }) => string | Promise<string>
+  }) => string | Promise<string | AdapterRenderResult>
+  getClientEntry?: (page: string, pagePath: string) => string
 }
 
 export interface Route {
@@ -49,6 +56,7 @@ export interface BuildManifest {
   pages: Record<string, {
     clientEntry: string
     serverEntry: string
+    css?: string[]
   }>
   apis: Record<string, {
     serverEntry: string

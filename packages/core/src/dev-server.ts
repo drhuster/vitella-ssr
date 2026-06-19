@@ -107,7 +107,7 @@ async function handlePageRoute(
   }
 
   const component = mod.default
-  const html = await config.adapter.render({
+  const renderResult = await config.adapter.render({
     page: route.filePath,
     component,
     loadData,
@@ -117,7 +117,7 @@ async function handlePageRoute(
 
   const template = loadHtmlShell(resolvePath(vite.config.root, config.appShell))
   const fullHtml = renderHtmlShell(template, {
-    html,
+    html: typeof renderResult === 'string' ? renderResult : renderResult.html,
     state: Object.keys(loadData).length > 0 ? loadData : undefined,
   })
 

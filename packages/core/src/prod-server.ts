@@ -143,13 +143,14 @@ export async function createProdServer(options: ProdServerOptions): Promise<http
             }
 
             if (config?.adapter && mod.default) {
-              html = await config.adapter.render({
+              const renderResult = await config.adapter.render({
                 page: url,
                 component: mod.default,
                 loadData,
                 req,
                 res,
               })
+              html = typeof renderResult === 'string' ? renderResult : renderResult.html
             } else if (typeof mod.default === 'function') {
               html = mod.default(loadData)
             } else {
