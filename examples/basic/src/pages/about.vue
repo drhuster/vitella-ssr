@@ -8,7 +8,6 @@ export const load = async () => {
   <main>
     <h1>About Vitella</h1>
     <p>Version: {{ version }}</p>
-    <a href="/">Home</a>
     <button @click="handleClick">Count: {{ count }}</button>
   </main>
 </template>
@@ -36,7 +35,7 @@ main {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  height: 100vh;
+  height: 80vh;
 }
 h1 {
   font-size: 2rem;

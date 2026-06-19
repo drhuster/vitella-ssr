@@ -43,6 +43,10 @@ export interface VitellaConfig {
   pagesDir?: string
   serverDir?: string
   assetsDir?: string
+  ttl?: {
+    images?: number
+    pages?: number
+  }
 }
 
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH'

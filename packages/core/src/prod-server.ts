@@ -92,6 +92,10 @@ export async function createProdServer(options: ProdServerOptions): Promise<http
       if (fs.existsSync(staticPath) && fs.statSync(staticPath).isFile()) {
         const ext = path.extname(staticPath)
         res.setHeader('Content-Type', mimeTypes[ext] || 'application/octet-stream')
+        const imageTtl = config?.ttl?.images
+        if (imageTtl && imageTtl > 0) {
+          res.setHeader('Cache-Control', `public, max-age=${imageTtl}`)
+        }
         const stream = fs.createReadStream(staticPath)
         stream.on('error', () => {
           res.statusCode = 500
@@ -140,6 +144,14 @@ export async function createProdServer(options: ProdServerOptions): Promise<http
 
             const entry = manifest.pages[pageMatch.route.path]
             const loadData: Record<string, unknown> = {}
+            let pageTtl: number | undefined = undefined
+
+            function mergeLoadResult(result: Record<string, unknown> | undefined) {
+              if (!result) return
+              if (result.ttl !== undefined) pageTtl = result.ttl as number
+              const { ttl, ...rest } = result
+              Object.assign(loadData, rest)
+            }
 
             let layoutComponent: any = undefined
             const layoutPath = pageMatch.route.layout
@@ -155,7 +167,7 @@ export async function createProdServer(options: ProdServerOptions): Promise<http
                   const queryStr = url.includes('?') ? url.split('?')[1] : ''
                   const query = Object.fromEntries(new URLSearchParams(queryStr))
                   const result = await layoutMod.load({ params: pageMatch.params, query, cookies: {} })
-                  Object.assign(loadData, result)
+                  mergeLoadResult(result)
                 }
                 layoutComponent = layoutMod.default
               } catch {}
@@ -165,7 +177,12 @@ export async function createProdServer(options: ProdServerOptions): Promise<http
               const queryStr = url.includes('?') ? url.split('?')[1] : ''
               const query = Object.fromEntries(new URLSearchParams(queryStr))
               const result = await mod.load({ params: pageMatch.params, query, cookies: {} })
-              Object.assign(loadData, result)
+              mergeLoadResult(result)
+            }
+
+            const finalTtl = pageTtl ?? config?.ttl?.pages
+            if (finalTtl && finalTtl > 0) {
+              res.setHeader('Cache-Control', `public, max-age=${finalTtl}`)
             }
 
             if (config?.adapter && mod.default) {

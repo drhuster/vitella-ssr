@@ -14,6 +14,7 @@ useHead({
         <a href="/about">About</a>
         <a href="/blog">Blog</a>
         <a href="/dashboard">Dashboard</a>
+        <a href="/cached">Cached</a>
       </nav>
     </header>
     <main>

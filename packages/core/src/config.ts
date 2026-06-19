@@ -1,6 +1,6 @@
 import type { VitellaConfig } from './types.js'
 
-export interface ResolvedVitellaConfig extends Required<Pick<VitellaConfig, 'pagesDir' | 'serverDir' | 'appShell' | 'assetsDir'>> {
+export interface ResolvedVitellaConfig extends Required<Pick<VitellaConfig, 'pagesDir' | 'serverDir' | 'appShell' | 'assetsDir' | 'ttl'>> {
   middleware: NonNullable<VitellaConfig['middleware']>
   adapter: VitellaConfig['adapter']
 }
@@ -13,5 +13,9 @@ export async function resolveConfig(userConfig?: Partial<VitellaConfig>): Promis
     assetsDir: userConfig?.assetsDir ?? 'src/assets',
     middleware: userConfig?.middleware ?? [],
     adapter: userConfig?.adapter ?? undefined,
+    ttl: {
+      images: userConfig?.ttl?.images ?? 0,
+      pages: userConfig?.ttl?.pages ?? 0,
+    },
   }
 }

@@ -10,13 +10,15 @@
   },
   "scripts": {
     "test": "vitest run --reporter verbose",
+    "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
     "build": "npm run build --workspaces --if-present",
     "lint": "tsc --noEmit"
   },
   "devDependencies": {
+    "@types/node": "25.9.3",
+    "@vitest/coverage-v8": "4.1.9",
     "typescript": "6.0.3",
-    "vitest": "4.1.9",
-    "@types/node": "25.9.3"
+    "vitest": "4.1.9"
   }
 }

@@ -106,6 +106,10 @@ export function vitellaPlugin(userConfig?: Record<string, unknown>): Plugin {
           if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
             const ext = extname(filePath)
             res.setHeader('Content-Type', ASSET_MIME_TYPES[ext] || 'application/octet-stream')
+            const imageTtl = state.config.ttl?.images
+            if (imageTtl && imageTtl > 0) {
+              res.setHeader('Cache-Control', `public, max-age=${imageTtl}`)
+            }
             const stream = fs.createReadStream(filePath)
             stream.on('error', () => {
               res.statusCode = 500

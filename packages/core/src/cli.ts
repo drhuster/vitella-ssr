@@ -33,6 +33,31 @@ async function getAdapter(): Promise<any> {
   return undefined
 }
 
+async function extractTtlFromViteConfig(root: string): Promise<{ images?: number; pages?: number } | undefined> {
+  const candidates = [
+    resolve(root, 'vite.config.js'),
+    resolve(root, 'vite.config.ts'),
+    resolve(root, 'vite.config.mjs'),
+    resolve(root, 'vite.config.mts'),
+  ]
+  for (const configPath of candidates) {
+    if (!fs.existsSync(configPath)) continue
+    try {
+      const source = fs.readFileSync(configPath, 'utf-8')
+      const ttlMatch = source.match(/ttl\s*:\s*\{([^}]+)\}/)
+      if (!ttlMatch) return undefined
+      const body = ttlMatch[1]
+      const images = body.match(/images\s*:\s*(\d+)/)
+      const pages = body.match(/pages\s*:\s*(\d+)/)
+      const result: { images?: number; pages?: number } = {}
+      if (images) result.images = parseInt(images[1], 10)
+      if (pages) result.pages = parseInt(pages[1], 10)
+      return Object.keys(result).length > 0 ? result : undefined
+    } catch {}
+  }
+  return undefined
+}
+
 async function main() {
   const root = process.cwd()
 
@@ -110,6 +135,11 @@ async function main() {
       const adapterPkg = await detectAdapterPackage(root)
       const buildConfig: Record<string, unknown> = { appShell: 'src/app.html' }
       if (adapterPkg) buildConfig.adapter = adapterPkg
+
+      // Extract TTL from vite config if present
+      const ttl = await extractTtlFromViteConfig(root)
+      if (ttl) buildConfig.ttl = ttl
+
       fs.writeFileSync(resolve(root, 'dist/config.json'), JSON.stringify(buildConfig, null, 2))
 
       // Copy assets directory to dist/client/assets/
@@ -151,13 +181,14 @@ async function main() {
     case 'start': {
       const distDir = resolve(root, 'dist')
       const appShell = resolve(root, 'src', 'app.html')
-      let config: { adapter?: unknown; appShell?: string } | undefined
+      let config: { adapter?: unknown; appShell?: string; ttl?: { images?: number; pages?: number } } | undefined
 
       try {
         const buildConfig = JSON.parse(fs.readFileSync(resolve(distDir, 'config.json'), 'utf-8'))
         if (buildConfig.adapter) {
           const adapter = await adapterForPackage(buildConfig.adapter)
           config = { adapter, appShell: buildConfig.appShell || appShell }
+          if (buildConfig.ttl) config.ttl = buildConfig.ttl
         }
       } catch {}
 

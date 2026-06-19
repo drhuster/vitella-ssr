@@ -98,6 +98,14 @@ async function handlePageRoute(
   const { config } = state
   const mod = await vite.ssrLoadModule(route.filePath)
   const loadData: Record<string, unknown> = {}
+  let pageTtl: number | undefined = undefined
+
+  function mergeLoadResult(result: Record<string, unknown> | undefined) {
+    if (!result) return
+    if (result.ttl !== undefined) pageTtl = result.ttl as number
+    const { ttl, ...rest } = result
+    Object.assign(loadData, rest)
+  }
 
   let layoutComponent: any = undefined
   if (route.layout) {
@@ -107,7 +115,7 @@ async function handlePageRoute(
       const queryStr = url.includes('?') ? url.split('?')[1] : ''
       const query = Object.fromEntries(new URLSearchParams(queryStr))
       const result = await layoutMod.load({ params, query, cookies: parseCookies(req) })
-      Object.assign(loadData, result)
+      mergeLoadResult(result)
     }
     layoutComponent = layoutMod.default
   }
@@ -117,7 +125,7 @@ async function handlePageRoute(
     const queryStr = url.includes('?') ? url.split('?')[1] : ''
     const query = Object.fromEntries(new URLSearchParams(queryStr))
     const result = await mod.load({ params, query, cookies: parseCookies(req) })
-    Object.assign(loadData, result)
+    mergeLoadResult(result)
   }
 
   if (!config.adapter) {
@@ -144,6 +152,11 @@ async function handlePageRoute(
   const scriptUrl = config.adapter.getClientEntry
     ? virtualClientUrl(route.filePath)
     : undefined
+
+  const finalTtl = pageTtl ?? config.ttl?.pages
+  if (finalTtl && finalTtl > 0) {
+    res.setHeader('Cache-Control', `public, max-age=${finalTtl}`)
+  }
 
   const template = loadHtmlShell(resolvePath(vite.config.root, config.appShell))
   const fullHtml = renderHtmlShell(template, {

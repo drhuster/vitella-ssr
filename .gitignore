@@ -4,7 +4,10 @@ dist/
 .vite/
 
 docs/
+coverage/
 
 .DS_Store
 .idea/
 .vscode/
+
+.env*
