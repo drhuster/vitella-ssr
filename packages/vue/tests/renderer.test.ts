@@ -4,6 +4,7 @@ import { IncomingMessage, ServerResponse } from 'http'
 import { Socket } from 'net'
 import SimpleComponent from './fixtures/SimpleComponent.vue'
 import PropsComponent from './fixtures/PropsComponent.vue'
+import HeadComponent from './fixtures/HeadComponent.vue'
 
 function createReqRes() {
   const req = new IncomingMessage(new Socket())
@@ -20,7 +21,7 @@ describe('vueAdapter', () => {
   it('render produces HTML string from a Vue component', async () => {
     const { req, res } = createReqRes()
 
-    const html = await vueAdapter.render({
+    const result = await vueAdapter.render({
       page: 'test.vue',
       component: SimpleComponent,
       loadData: {},
@@ -28,6 +29,7 @@ describe('vueAdapter', () => {
       res,
     })
 
+    const html = typeof result === 'string' ? result : result.html
     expect(html).toContain('<div')
     expect(html).toContain('Hello from Vue')
   })
@@ -35,7 +37,7 @@ describe('vueAdapter', () => {
   it('passes loadData as props', async () => {
     const { req, res } = createReqRes()
 
-    const html = await vueAdapter.render({
+    const result = await vueAdapter.render({
       page: 'test.vue',
       component: PropsComponent,
       loadData: { message: 'SSR works!' },
@@ -43,6 +45,34 @@ describe('vueAdapter', () => {
       res,
     })
 
+    const html = typeof result === 'string' ? result : result.html
     expect(html).toContain('SSR works!')
+  })
+
+  it('returns structured result with html, title, and head', async () => {
+    const { req, res } = createReqRes()
+
+    const result = await vueAdapter.render({
+      page: 'test.vue',
+      component: HeadComponent,
+      loadData: {},
+      req,
+      res,
+    })
+
+    expect(typeof result).not.toBe('string')
+    if (typeof result !== 'string') {
+      expect(result.html).toContain('Custom Head Page')
+      expect(result.title).toBe('Test Page')
+      expect(result.head).toContain('Test Page')
+    }
+  })
+
+  it('getClientEntry returns valid JS module source', () => {
+    const entry = vueAdapter.getClientEntry!('/about', 'src/pages/about.vue')
+    expect(entry).toContain('createSSRApp')
+    expect(entry).toContain('src/pages/about.vue')
+    expect(entry).toContain('__INITIAL_STATE__')
+    expect(entry).toContain('mount')
   })
 })
