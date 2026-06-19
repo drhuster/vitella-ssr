@@ -27,6 +27,8 @@ export type { ProdServerOptions } from './prod-server.js'
 export function vitellaPlugin(userConfig?: Record<string, unknown>): Plugin {
   let state: DevServerState
 
+  const VIRTUAL_PREFIX = '\0vitella:client-entry:'
+
   return {
     name: 'vitella-ssr',
     enforce: 'pre',
@@ -43,6 +45,25 @@ export function vitellaPlugin(userConfig?: Record<string, unknown>): Plugin {
       const manifest = buildRouteManifest(pagesDir, resolve(root, resolved.serverDir), pageExts)
 
       state = { manifest, config: resolved }
+    },
+
+    resolveId(id: string) {
+      if (id.startsWith('vitella:client-entry:')) {
+        return VIRTUAL_PREFIX + id.slice('vitella:client-entry:'.length)
+      }
+      return null
+    },
+
+    load(id: string) {
+      if (id.startsWith(VIRTUAL_PREFIX)) {
+        const pagePath = id.slice(VIRTUAL_PREFIX.length)
+        const adapter = state?.config?.adapter
+        if (adapter?.getClientEntry) {
+          return adapter.getClientEntry(id, pagePath)
+        }
+        return null
+      }
+      return null
     },
 
     configureServer(server: ViteDevServer) {

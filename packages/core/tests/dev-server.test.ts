@@ -21,4 +21,22 @@ describe('vitellaPlugin', () => {
     const plugin = vitellaPlugin()
     expect(plugin.enforce).toBe('pre')
   })
+
+  it('registers resolveId and load hooks for virtual modules', () => {
+    const plugin = vitellaPlugin() as any
+    expect(typeof plugin.resolveId).toBe('function')
+    expect(typeof plugin.load).toBe('function')
+  })
+
+  it('resolveId handles vitella:client-entry: prefix', () => {
+    const plugin = vitellaPlugin() as any
+    const resolved = plugin.resolveId('vitella:client-entry:/src/pages/index.vue')
+    expect(resolved).toBe('\0vitella:client-entry:/src/pages/index.vue')
+  })
+
+  it('resolveId returns null for non-virtual modules', () => {
+    const plugin = vitellaPlugin() as any
+    const resolved = plugin.resolveId('./normal-module.js')
+    expect(resolved).toBeNull()
+  })
 })

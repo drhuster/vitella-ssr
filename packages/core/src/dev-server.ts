@@ -5,7 +5,7 @@ import { matchRoute } from './route-matcher.js'
 import { runMiddleware } from './middleware-chain.js'
 import { loadHtmlShell, renderHtmlShell } from './html-shell.js'
 import type { ResolvedVitellaConfig } from './config.js'
-import type { ApiHandlerModule } from './types.js'
+import type { AdapterRenderResult, ApiHandlerModule } from './types.js'
 import { resolve as resolvePath } from 'path'
 
 export interface DevServerState {
@@ -23,6 +23,14 @@ function parseCookies(req: IncomingMessage): Record<string, string> {
       return [c.slice(0, idx).trim(), c.slice(idx + 1).trim()]
     })
   )
+}
+
+function isStructuredResult(result: any): result is AdapterRenderResult {
+  return typeof result === 'object' && result !== null && typeof result.html === 'string'
+}
+
+function virtualClientUrl(pagePath: string): string {
+  return `/@id/__x00__vitella:client-entry:${pagePath}`
 }
 
 export async function handleRequest(
@@ -107,7 +115,7 @@ async function handlePageRoute(
   }
 
   const component = mod.default
-  const renderResult = await config.adapter.render({
+  const raw = await config.adapter.render({
     page: route.filePath,
     component,
     loadData,
@@ -115,10 +123,21 @@ async function handlePageRoute(
     res,
   })
 
+  const html = isStructuredResult(raw) ? raw.html : raw
+  const title = isStructuredResult(raw) ? raw.title : undefined
+  const head = isStructuredResult(raw) ? raw.head : undefined
+
+  const scriptUrl = config.adapter.getClientEntry
+    ? virtualClientUrl(route.filePath)
+    : undefined
+
   const template = loadHtmlShell(resolvePath(vite.config.root, config.appShell))
   const fullHtml = renderHtmlShell(template, {
-    html: typeof renderResult === 'string' ? renderResult : renderResult.html,
+    html,
+    title,
+    head,
     state: Object.keys(loadData).length > 0 ? loadData : undefined,
+    scripts: scriptUrl ? [scriptUrl] : undefined,
   })
 
   res.setHeader('Content-Type', 'text/html')
