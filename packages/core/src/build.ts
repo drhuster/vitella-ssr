@@ -9,6 +9,7 @@ export function generateBuildManifest(routes: RouteManifest): BuildManifest {
     pages[route.path] = {
       clientEntry: `client/assets/${safeName}.js`,
       serverEntry: `server/${safeName}.js`,
+      css: undefined,
     }
   }
 

@@ -40,4 +40,16 @@ describe('generateBuildManifest', () => {
     expect(buildManifest.pages).toEqual({})
     expect(buildManifest.apis).toEqual({})
   })
+
+  it('includes optional css field in page entries', () => {
+    const routeManifest: RouteManifest = {
+      pages: [
+        { path: '/', pattern: /^\//, paramNames: [], filePath: 'src/pages/index.vue', type: 'page' },
+      ],
+      apis: [],
+    }
+    const buildManifest = generateBuildManifest(routeManifest)
+    expect(buildManifest.pages['/']).toHaveProperty('css')
+    expect(buildManifest.pages['/'].css).toBeUndefined()
+  })
 })
