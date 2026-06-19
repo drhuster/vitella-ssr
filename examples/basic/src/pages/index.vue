@@ -9,3 +9,12 @@
     </nav>
   </main>
 </template>
+
+<script setup>
+import { useHead } from '@vitella-ssr/vue'
+
+useHead({
+  title: 'Vitella SSR — Home',
+  meta: [{ name: 'description', content: 'A minimal SSR framework built on Vite' }],
+})
+</script>
