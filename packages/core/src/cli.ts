@@ -85,6 +85,13 @@ async function main() {
         const safeName = page.path.replace(/\//g, '_').replace(/:/g, '_').replace(/^_/, '') || 'index'
         ssrInput[safeName] = page.filePath
       }
+      for (const layoutPath of [...new Set(routeManifest.pages.filter(p => p.layout).map(p => p.layout!))]) {
+        const layoutSafeName = layoutPath
+          .replace(/\//g, '_')
+          .replace(/\.[^/.]+$/, '')
+          .replace(/^_/, '') || '_layout'
+        ssrInput[layoutSafeName] = layoutPath
+      }
       for (const api of routeManifest.apis) {
         const safeName = api.path.replace(/\//g, '_').replace(/:/g, '_').replace(/^_/, '') || 'api_index'
         ssrInput[safeName] = api.filePath
@@ -105,6 +112,15 @@ async function main() {
       if (adapterPkg) buildConfig.adapter = adapterPkg
       fs.writeFileSync(resolve(root, 'dist/config.json'), JSON.stringify(buildConfig, null, 2))
 
+      // Copy assets directory to dist/client/assets/
+      const assetsDir = resolve(root, 'src/assets')
+      if (fs.existsSync(assetsDir)) {
+        const distAssetsDir = resolve(root, 'dist/client/assets')
+        fs.mkdirSync(distAssetsDir, { recursive: true })
+        fs.cpSync(assetsDir, distAssetsDir, { recursive: true })
+        console.log('Assets copied to dist/client/assets/')
+      }
+
       // Generate manifests with CSS mapping
       const buildManifest = generateBuildManifest(routeManifest)
 
@@ -123,7 +139,7 @@ async function main() {
 
       fs.writeFileSync(resolve(root, 'dist/manifest.json'), JSON.stringify(buildManifest, null, 2))
       const routeData = {
-        pages: routeManifest.pages.map(r => ({ path: r.path, paramNames: r.paramNames, type: r.type })),
+        pages: routeManifest.pages.map(r => ({ path: r.path, paramNames: r.paramNames, type: r.type, layout: r.layout })),
         apis: routeManifest.apis.map(r => ({ path: r.path, paramNames: r.paramNames, type: r.type })),
       }
       fs.writeFileSync(resolve(root, 'dist/routes.json'), JSON.stringify(routeData, null, 2))

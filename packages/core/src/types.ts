@@ -12,11 +12,12 @@ export interface Adapter {
   render: (options: {
     page: string
     component: any
+    layout?: any
     loadData: Record<string, unknown>
     req: IncomingMessage
     res: ServerResponse
   }) => string | Promise<string | AdapterRenderResult>
-  getClientEntry?: (page: string, pagePath: string) => string
+  getClientEntry?: (page: string, pagePath: string, layout?: string) => string
 }
 
 export interface Route {
@@ -24,6 +25,7 @@ export interface Route {
   pattern: RegExp
   paramNames: string[]
   filePath: string
+  layout?: string
   type: 'page' | 'api'
 }
 
@@ -40,6 +42,7 @@ export interface VitellaConfig {
   adapter?: Adapter
   pagesDir?: string
   serverDir?: string
+  assetsDir?: string
 }
 
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH'

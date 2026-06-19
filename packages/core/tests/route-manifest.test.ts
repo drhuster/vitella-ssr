@@ -112,6 +112,54 @@ describe('buildRouteManifest', () => {
     expect(manifest.apis.find(r => r.path === '/api/data')).toBeTruthy()
   })
 
+  it('excludes _layout.vue from page routes', () => {
+    const pagesDir = join(tmpDir, 'pages')
+    mkdirSync(pagesDir, { recursive: true })
+    writeFileSync(join(pagesDir, '_layout.vue'), '')
+    writeFileSync(join(pagesDir, 'index.vue'), '')
+    writeFileSync(join(pagesDir, 'about.vue'), '')
+
+    const manifest = buildRouteManifest(pagesDir)
+    expect(manifest.pages).toHaveLength(2)
+    expect(manifest.pages.find(r => r.filePath.endsWith('_layout.vue'))).toBeFalsy()
+  })
+
+  it('resolves root _layout.vue for all pages', () => {
+    const pagesDir = join(tmpDir, 'pages')
+    mkdirSync(pagesDir, { recursive: true })
+    writeFileSync(join(pagesDir, '_layout.vue'), '')
+    writeFileSync(join(pagesDir, 'index.vue'), '')
+    writeFileSync(join(pagesDir, 'dashboard.vue'), '')
+
+    const manifest = buildRouteManifest(pagesDir)
+    const routesWithLayout = manifest.pages.filter(r => r.layout?.endsWith('_layout.vue'))
+    expect(routesWithLayout.length).toBe(manifest.pages.length)
+  })
+
+  it('resolves nearest ancestor _layout.vue for subdirectory pages', () => {
+    const pagesDir = join(tmpDir, 'pages')
+    mkdirSync(join(pagesDir, 'admin'), { recursive: true })
+    writeFileSync(join(pagesDir, '_layout.vue'), '')
+    writeFileSync(join(pagesDir, 'index.vue'), '')
+    writeFileSync(join(pagesDir, 'admin', '_layout.vue'), '')
+    writeFileSync(join(pagesDir, 'admin', 'users.vue'), '')
+
+    const manifest = buildRouteManifest(pagesDir)
+    const root = manifest.pages.find(r => r.path === '/')!
+    const admin = manifest.pages.find(r => r.path === '/admin/users')!
+    expect(root.layout!.endsWith('pages/_layout.vue')).toBe(true)
+    expect(admin.layout!.endsWith('admin/_layout.vue')).toBe(true)
+  })
+
+  it('returns no layout when no _layout file exists', () => {
+    const pagesDir = join(tmpDir, 'pages')
+    mkdirSync(pagesDir, { recursive: true })
+    writeFileSync(join(pagesDir, 'index.vue'), '')
+
+    const manifest = buildRouteManifest(pagesDir)
+    expect(manifest.pages[0].layout).toBeUndefined()
+  })
+
   it('escapes regex special characters in file/directory names', () => {
     const pagesDir = join(tmpDir, 'pages')
     mkdirSync(pagesDir, { recursive: true })

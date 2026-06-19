@@ -34,6 +34,12 @@ describe('vitellaPlugin', () => {
     expect(resolved).toBe('\0vitella:client-entry:/src/pages/index.vue')
   })
 
+  it('resolveId handles \\0-prefixed id from /@id/ URL decoding', () => {
+    const plugin = vitellaPlugin() as any
+    const resolved = plugin.resolveId('\0vitella:client-entry:/src/pages/index.vue')
+    expect(resolved).toBe('\0vitella:client-entry:/src/pages/index.vue')
+  })
+
   it('resolveId returns null for non-virtual modules', () => {
     const plugin = vitellaPlugin() as any
     const resolved = plugin.resolveId('./normal-module.js')

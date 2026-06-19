@@ -12,7 +12,9 @@
   },
   "dependencies": {
     "@vitella-ssr/core": "*",
+    "@vitella-ssr/pinia": "*",
     "@vitella-ssr/vue": "*",
+    "pinia": "3.0.4",
     "vue": "3.5.38"
   },
   "devDependencies": {

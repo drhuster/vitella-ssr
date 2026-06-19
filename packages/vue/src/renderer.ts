@@ -4,17 +4,21 @@ import type { AdapterRenderResult } from '@vitella-ssr/core'
 
 export async function renderVueComponent(
   component: any,
-  loadData: Record<string, unknown>
+  loadData: Record<string, unknown>,
+  layout?: any
 ): Promise<string | AdapterRenderResult> {
   const ssrContext: { head?: { title?: string; meta?: Array<any>; link?: Array<any> } } = {}
 
   const app = createSSRApp({
     render() {
+      if (layout) {
+        return h(layout, null, {
+          default: () => h(component, loadData),
+        })
+      }
       return h(component, loadData)
     },
   })
-
-  app.provide('ssrContext', ssrContext)
 
   const html = await renderToString(app, ssrContext)
 

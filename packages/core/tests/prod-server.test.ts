@@ -173,3 +173,77 @@ describe('createProdServer with middleware errors', () => {
     expect(res.status).toBe(500)
   })
 })
+
+describe('createProdServer with assets directory', () => {
+  let tmpDir: string
+  let server: http.Server
+  const port = 9879
+
+  beforeAll(async () => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'vitella-assets-'))
+    const distDir = join(tmpDir, 'dist')
+    mkdirSync(distDir, { recursive: true })
+
+    writeFileSync(join(distDir, 'manifest.json'), JSON.stringify({ pages: {}, apis: {} }))
+    writeFileSync(join(distDir, 'routes.json'), JSON.stringify({ pages: [], apis: [] }))
+
+    // Create dist/client directory with an assets subdirectory
+    const clientAssets = join(distDir, 'client', 'assets')
+    mkdirSync(clientAssets, { recursive: true })
+
+    // Create test assets
+    writeFileSync(join(clientAssets, 'test.css'), 'body { color: red; }')
+    writeFileSync(join(clientAssets, 'logo.png'), 'fake-png-data')
+
+    const nestedDir = join(clientAssets, 'nested')
+    mkdirSync(nestedDir, { recursive: true })
+    writeFileSync(join(nestedDir, 'deep.txt'), 'deep file')
+
+    server = await createProdServer({
+      distDir,
+      appShell: join(tmpDir, 'app.html'),
+    })
+    await new Promise<void>(resolve => server.listen(port, resolve))
+  })
+
+  afterAll(async () => {
+    await new Promise(resolve => server.close(resolve))
+    rmSync(tmpDir, { recursive: true, force: true })
+  })
+
+  it('serves CSS files from /assets/ path', async () => {
+    const res = await fetch(`http://localhost:${port}/assets/test.css`)
+    expect(res.status).toBe(200)
+    expect(res.headers.get('content-type')).toBe('text/css')
+    const text = await res.text()
+    expect(text).toBe('body { color: red; }')
+  })
+
+  it('serves image files from /assets/ path', async () => {
+    const res = await fetch(`http://localhost:${port}/assets/logo.png`)
+    expect(res.status).toBe(200)
+    expect(res.headers.get('content-type')).toBe('image/png')
+    const text = await res.text()
+    expect(text).toBe('fake-png-data')
+  })
+
+  it('returns 404 for missing assets', async () => {
+    const res = await fetch(`http://localhost:${port}/assets/missing.js`)
+    expect(res.status).toBe(404)
+  })
+
+  it('blocks path traversal in assets', async () => {
+    const secretFile = join(tmpDir, 'secret.txt')
+    writeFileSync(secretFile, 'sensitive data')
+
+    const res = await new Promise<http.IncomingMessage>((resolve, reject) => {
+      const req = http.get(
+        { hostname: 'localhost', port, path: '/assets/../../secret.txt' },
+        resolve,
+      )
+      req.on('error', reject)
+    })
+
+    expect(res.statusCode).toBe(403)
+  })
+})

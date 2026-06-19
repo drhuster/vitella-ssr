@@ -68,6 +68,31 @@ describe('vueAdapter', () => {
     }
   })
 
+  it('renders within a layout component when layout is provided', async () => {
+    const { req, res } = createReqRes()
+    const TestLayout = {
+      template: '<div class="layout"><slot /></div>',
+    }
+    const result = await vueAdapter.render({
+      page: 'test.vue', component: SimpleComponent, layout: TestLayout, loadData: {}, req, res,
+    })
+    const html = typeof result === 'string' ? result : result.html
+    expect(html).toContain('class="layout"')
+    expect(html).toContain('Hello from Vue')
+  })
+
+  it('getClientEntry wraps page in layout when layout path is provided', () => {
+    const entry = vueAdapter.getClientEntry!('/about', 'src/pages/about.vue', 'src/pages/_layout.vue')
+    expect(entry).toContain('_layout.vue')
+    expect(entry).toContain('h(Layout, null')
+    expect(entry).toContain('about.vue')
+  })
+
+  it('getClientEntry does not wrap when layout is not provided', () => {
+    const entry = vueAdapter.getClientEntry!('/about', 'src/pages/about.vue')
+    expect(entry).not.toContain('h(Layout')
+  })
+
   it('getClientEntry returns valid JS module source', () => {
     const entry = vueAdapter.getClientEntry!('/about', 'src/pages/about.vue')
     expect(entry).toContain('createSSRApp')

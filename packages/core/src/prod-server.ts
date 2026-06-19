@@ -11,6 +11,7 @@ interface RouteData {
   path: string
   paramNames: string[]
   type: 'page' | 'api'
+  layout?: string
 }
 
 function deserializeRoutes(data: { pages: RouteData[]; apis: RouteData[] }): { pages: Route[]; apis: Route[] } {
@@ -19,6 +20,7 @@ function deserializeRoutes(data: { pages: RouteData[]; apis: RouteData[] }): { p
     paramNames: r.paramNames,
     type: r.type,
     filePath: '',
+    layout: r.layout,
     pattern: new RegExp(
       `^${r.path === '/'
         ? '/'
@@ -139,6 +141,26 @@ export async function createProdServer(options: ProdServerOptions): Promise<http
             const entry = manifest.pages[pageMatch.route.path]
             const loadData: Record<string, unknown> = {}
 
+            let layoutComponent: any = undefined
+            const layoutPath = pageMatch.route.layout
+            if (layoutPath) {
+              const layoutSafeName = layoutPath
+                .replace(/\//g, '_')
+                .replace(/\.[^/.]+$/, '')
+                .replace(/^_/, '') || '_layout'
+              const layoutModPath = path.join(distDir, 'server', `${layoutSafeName}.js`)
+              try {
+                const layoutMod = await import(layoutModPath)
+                if (typeof layoutMod.load === 'function') {
+                  const queryStr = url.includes('?') ? url.split('?')[1] : ''
+                  const query = Object.fromEntries(new URLSearchParams(queryStr))
+                  const result = await layoutMod.load({ params: pageMatch.params, query, cookies: {} })
+                  Object.assign(loadData, result)
+                }
+                layoutComponent = layoutMod.default
+              } catch {}
+            }
+
             if (typeof mod.load === 'function') {
               const queryStr = url.includes('?') ? url.split('?')[1] : ''
               const query = Object.fromEntries(new URLSearchParams(queryStr))
@@ -150,6 +172,7 @@ export async function createProdServer(options: ProdServerOptions): Promise<http
               const raw = await config.adapter.render({
                 page: url,
                 component: mod.default,
+                layout: layoutComponent,
                 loadData,
                 req,
                 res,

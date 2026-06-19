@@ -1,4 +1,6 @@
-import { useSSRContext } from 'vue'
+import { inject } from 'vue'
+
+const SSR_CONTEXT_KEY = Symbol.for('v-scx')
 
 export interface HeadAttrs {
   title?: string
@@ -15,7 +17,7 @@ export interface HeadAttrs {
 }
 
 export function useHead(options: HeadAttrs) {
-  const ctx = useSSRContext() as { head?: HeadAttrs } | null
+  const ctx = inject<{ head?: HeadAttrs } | null>(SSR_CONTEXT_KEY, null)
   if (!ctx) return
 
   if (!ctx.head) {

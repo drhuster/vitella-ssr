@@ -27,4 +27,14 @@ describe('resolveConfig', () => {
     const config = await resolveConfig()
     expect(config.adapter).toBeUndefined()
   })
+
+  it('defaults assetsDir to src/assets', async () => {
+    const config = await resolveConfig()
+    expect(config.assetsDir).toBe('src/assets')
+  })
+
+  it('overrides assetsDir when provided', async () => {
+    const config = await resolveConfig({ assetsDir: 'static' })
+    expect(config.assetsDir).toBe('static')
+  })
 })

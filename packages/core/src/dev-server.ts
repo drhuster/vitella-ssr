@@ -5,7 +5,7 @@ import { matchRoute } from './route-matcher.js'
 import { runMiddleware } from './middleware-chain.js'
 import { loadHtmlShell, renderHtmlShell } from './html-shell.js'
 import type { ResolvedVitellaConfig } from './config.js'
-import type { AdapterRenderResult, ApiHandlerModule } from './types.js'
+import type { AdapterRenderResult, ApiHandlerModule, Route } from './types.js'
 import { resolve as resolvePath } from 'path'
 
 export interface DevServerState {
@@ -88,7 +88,7 @@ async function handleApiRoute(
 }
 
 async function handlePageRoute(
-  route: { filePath: string },
+  route: Route,
   params: Record<string, string>,
   req: IncomingMessage,
   res: ServerResponse,
@@ -98,6 +98,19 @@ async function handlePageRoute(
   const { config } = state
   const mod = await vite.ssrLoadModule(route.filePath)
   const loadData: Record<string, unknown> = {}
+
+  let layoutComponent: any = undefined
+  if (route.layout) {
+    const layoutMod = await vite.ssrLoadModule(route.layout)
+    if (typeof layoutMod.load === 'function') {
+      const url = req.url || '/'
+      const queryStr = url.includes('?') ? url.split('?')[1] : ''
+      const query = Object.fromEntries(new URLSearchParams(queryStr))
+      const result = await layoutMod.load({ params, query, cookies: parseCookies(req) })
+      Object.assign(loadData, result)
+    }
+    layoutComponent = layoutMod.default
+  }
 
   if (typeof mod.load === 'function') {
     const url = req.url || '/'
@@ -118,6 +131,7 @@ async function handlePageRoute(
   const raw = await config.adapter.render({
     page: route.filePath,
     component,
+    layout: layoutComponent,
     loadData,
     req,
     res,

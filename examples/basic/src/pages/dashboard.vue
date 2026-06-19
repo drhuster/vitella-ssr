@@ -1,7 +1,7 @@
 <script>
-export const load = async () => {
-  return { stats: { users: 1243, pages: 47, uptime: '99.9%' } }
-}
+export const load = async () => ({
+  stats: { users: 1243, pages: 47, uptime: '99.9%' },
+})
 </script>
 
 <template>
@@ -12,10 +12,17 @@ export const load = async () => {
       <div><strong>Pages:</strong> {{ stats.pages }}</div>
       <div><strong>Uptime:</strong> {{ stats.uptime }}</div>
     </div>
-    <a href="/">Home</a>
+    <section>
+      <h2>Pinia Counter (shared across pages)</h2>
+      <p>Count: {{ counter.count }}</p>
+      <button @click="counter.increment">+1</button>
+    </section>
   </main>
 </template>
 
 <script setup>
+import { useCounterStore } from '../stores/counter'
 defineProps(['stats'])
+
+const counter = useCounterStore()
 </script>

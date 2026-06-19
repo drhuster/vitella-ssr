@@ -16,6 +16,34 @@ export function buildRouteManifest(
 ): RouteManifest {
   const pages: Route[] = []
   const apis: Route[] = []
+  const layoutCache = new Map<string, string | null>()
+
+  function resolveLayout(dir: string, exts: string[]): string | undefined {
+    let current = dir
+    while (true) {
+      const cached = layoutCache.get(current)
+      if (cached !== undefined) {
+        if (current !== dir) layoutCache.set(dir, cached)
+        return cached || undefined
+      }
+      for (const ext of exts) {
+        const layoutPath = join(current, `_layout${ext}`)
+        try {
+          if (statSync(layoutPath).isFile()) {
+            layoutCache.set(current, layoutPath)
+            if (current !== dir) layoutCache.set(dir, layoutPath)
+            return layoutPath
+          }
+        } catch {}
+      }
+      const parent = dirname(current)
+      if (parent === current) {
+        layoutCache.set(dir, null)
+        return undefined
+      }
+      current = parent
+    }
+  }
 
   function scan(dir: string, baseUrl: string, type: 'page' | 'api'): void {
     let entries: string[]
@@ -38,6 +66,8 @@ export function buildRouteManifest(
         if (!validExts.includes(ext)) continue
 
         const name = basename(entry, ext)
+        if (type === 'page' && name === '_layout') continue
+
         let urlPath = name === 'index' ? baseUrl || '/' : `${baseUrl}/${name}`
         if (urlPath === '') urlPath = '/'
 
@@ -59,6 +89,7 @@ export function buildRouteManifest(
           pattern,
           paramNames,
           filePath: fullPath,
+          layout: type === 'page' ? resolveLayout(dir, validExts) : undefined,
           type: type as 'page' | 'api',
         }
         ;(type === 'page' ? pages : apis).push(route)
