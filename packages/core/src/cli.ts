@@ -2,6 +2,7 @@
 import { createServer as createViteDevServer } from 'vite'
 import { resolve } from 'path'
 import fs from 'fs'
+import path from 'path'
 import { vitellaPlugin } from './index.js'
 import { createProdServer } from './prod-server.js'
 import { buildRouteManifest } from './route-manifest.js'
@@ -26,6 +27,12 @@ async function adapterForPackage(name: string): Promise<unknown> {
   return mod.vueAdapter || mod.piniaAdapter || undefined
 }
 
+async function getAdapter(): Promise<any> {
+  const adapterPkg = await detectAdapterPackage(process.cwd())
+  if (adapterPkg) return adapterForPackage(adapterPkg)
+  return undefined
+}
+
 async function main() {
   const root = process.cwd()
 
@@ -47,9 +54,29 @@ async function main() {
       const serverDir = resolve(root, 'src/server')
       const routeManifest = buildRouteManifest(pagesDir, serverDir)
 
+      // Generate per-page client entry files
+      const entriesDir = resolve(root, '.vitella', 'entries', 'pages')
+      fs.mkdirSync(entriesDir, { recursive: true })
+
+      const clientInputs: Record<string, string> = {}
+      const adapter = await getAdapter()
+
+      if (adapter?.getClientEntry) {
+        for (const page of routeManifest.pages) {
+          const safeName = page.path.replace(/\//g, '_').replace(/:/g, '_').replace(/^_/, '') || 'index'
+          const entryPath = resolve(entriesDir, `${safeName}.js`)
+          const entrySource = adapter.getClientEntry(page.path, page.filePath)
+          fs.writeFileSync(entryPath, entrySource, 'utf-8')
+          clientInputs[safeName] = entryPath
+        }
+      }
+
       // Build client
       console.log('Building client...')
-      await build({ root, build: { outDir: 'dist/client' } })
+      const clientExtra = Object.keys(clientInputs).length > 0
+        ? { rollupOptions: { input: clientInputs } }
+        : {}
+      await build({ root, build: { outDir: 'dist/client', ...clientExtra } })
 
       // Build server (SSR multi-entry)
       console.log('Building server...')
@@ -78,8 +105,22 @@ async function main() {
       if (adapterPkg) buildConfig.adapter = adapterPkg
       fs.writeFileSync(resolve(root, 'dist/config.json'), JSON.stringify(buildConfig, null, 2))
 
-      // Generate manifests
+      // Generate manifests with CSS mapping
       const buildManifest = generateBuildManifest(routeManifest)
+
+      // Map CSS from Vite client manifest
+      const clientManifestPath = resolve(root, 'dist', 'client', '.vite', 'manifest.json')
+      if (fs.existsSync(clientManifestPath)) {
+        const clientManifest = JSON.parse(fs.readFileSync(clientManifestPath, 'utf-8'))
+        for (const [pagePath, entry] of Object.entries(buildManifest.pages)) {
+          const safeName = pagePath.replace(/\//g, '_').replace(/:/g, '_').replace(/^_/, '') || 'index'
+          const viteEntry = clientManifest[`assets/${safeName}.js`]
+          if (viteEntry?.css) {
+            entry.css = viteEntry.css
+          }
+        }
+      }
+
       fs.writeFileSync(resolve(root, 'dist/manifest.json'), JSON.stringify(buildManifest, null, 2))
       const routeData = {
         pages: routeManifest.pages.map(r => ({ path: r.path, paramNames: r.paramNames, type: r.type })),
