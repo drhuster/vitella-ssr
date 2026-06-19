@@ -7,6 +7,7 @@ import { resolveConfig } from './config.js'
 
 export type {
   Adapter,
+  AdapterRenderResult,
   Route,
   RouteManifest,
   VitellaConfig,
