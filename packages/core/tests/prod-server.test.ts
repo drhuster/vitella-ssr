@@ -940,6 +940,307 @@ export default function() { return '<div>layout-import-err-ok</div>' }
   })
 })
 
+describe('createProdServer with custom error page', () => {
+  let tmpDir: string
+  let server: http.Server
+  const port = 9895
+
+  beforeAll(async () => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'vitella-err-'))
+    const distDir = join(tmpDir, 'dist')
+    mkdirSync(join(distDir, 'server'), { recursive: true })
+    mkdirSync(join(distDir, 'client'), { recursive: true })
+
+    writeFileSync(join(distDir, 'server', '_error.js'), `
+export default function(data) { return '<div>Custom Error:' + data.statusCode + '</div>' }
+`)
+
+    const appShell = join(tmpDir, 'app.html')
+    writeFileSync(appShell, '<html><head></head><body><!--vitella-html--></body></html>')
+
+    writeFileSync(join(distDir, 'manifest.json'), JSON.stringify({ pages: {}, apis: {} }))
+    writeFileSync(join(distDir, 'routes.json'), JSON.stringify({
+      pages: [],
+      apis: [],
+      errorPage: { filePath: '_error' },
+    }))
+
+    const config = {
+      adapter: {
+        name: 'test',
+        extensions: ['.js'],
+        render: async ({ component, loadData }: any) => {
+          if (typeof component === 'function') return component(loadData)
+          return '<div>rendered</div>'
+        },
+      },
+    }
+
+    server = await createProdServer({ distDir, appShell, config: config as any })
+    await new Promise<void>(resolve => server.listen(port, resolve))
+  })
+
+  afterAll(async () => {
+    await new Promise(resolve => server.close(resolve))
+    rmSync(tmpDir, { recursive: true, force: true })
+  })
+
+  it('returns custom error page for unknown routes', async () => {
+    const res = await fetch(`http://localhost:${port}/nonexistent`)
+    expect(res.status).toBe(404)
+    const text = await res.text()
+    expect(text).toContain('Custom Error:404')
+  })
+})
+
+describe('createProdServer with error page and layout', () => {
+  let tmpDir: string
+  let server: http.Server
+  const port = 9896
+
+  beforeAll(async () => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'vitella-err-lay-'))
+    const distDir = join(tmpDir, 'dist')
+    mkdirSync(join(distDir, 'server'), { recursive: true })
+    mkdirSync(join(distDir, 'client'), { recursive: true })
+
+    writeFileSync(join(distDir, 'server', '_error.js'), `
+export default function(data) { return '<div>Err:' + data.statusCode + '</div>' }
+`)
+
+    writeFileSync(join(distDir, 'server', 'layout.js'), `
+export const load = async () => {
+  return { layoutMsg: 'from-error-layout' }
+}
+export default function() { return '' }
+`)
+
+    const appShell = join(tmpDir, 'app.html')
+    writeFileSync(appShell, '<html><head></head><body><!--vitella-html--></body></html>')
+
+    writeFileSync(join(distDir, 'manifest.json'), JSON.stringify({ pages: {}, apis: {} }))
+    writeFileSync(join(distDir, 'routes.json'), JSON.stringify({
+      pages: [],
+      apis: [],
+      errorPage: { filePath: '_error', layout: '_layout' },
+    }))
+
+    const config = {
+      adapter: {
+        name: 'test',
+        extensions: ['.js'],
+        render: async ({ loadData }: any) => {
+          return '<div>layout-test ' + (loadData?.layoutMsg || 'no-layout-data') + '</div>'
+        },
+      },
+    }
+
+    server = await createProdServer({ distDir, appShell, config: config as any })
+    await new Promise<void>(resolve => server.listen(port, resolve))
+  })
+
+  afterAll(async () => {
+    await new Promise(resolve => server.close(resolve))
+    rmSync(tmpDir, { recursive: true, force: true })
+  })
+
+  it('loads error layout and passes its data', async () => {
+    const res = await fetch(`http://localhost:${port}/missing`)
+    expect(res.status).toBe(404)
+    const text = await res.text()
+    expect(text).toContain('from-error-layout')
+  })
+})
+
+describe('createProdServer with error page CSS', () => {
+  let tmpDir: string
+  let server: http.Server
+  const port = 9897
+
+  beforeAll(async () => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'vitella-err-css-'))
+    const distDir = join(tmpDir, 'dist')
+    mkdirSync(join(distDir, 'server'), { recursive: true })
+    mkdirSync(join(distDir, 'client'), { recursive: true })
+
+    writeFileSync(join(distDir, 'server', '_error.js'), `
+export default function() { return '<div>styled error</div>' }
+`)
+
+    const appShell = join(tmpDir, 'app.html')
+    writeFileSync(appShell, '<html><head><!--vitella-head--></head><body><!--vitella-html--></body></html>')
+
+    writeFileSync(join(distDir, 'manifest.json'), JSON.stringify({
+      pages: { '__error__': { css: ['assets/error.css'] } },
+      apis: {},
+    }))
+    writeFileSync(join(distDir, 'routes.json'), JSON.stringify({
+      pages: [],
+      apis: [],
+      errorPage: { filePath: '_error' },
+    }))
+
+    const config = {
+      adapter: {
+        name: 'test',
+        extensions: ['.js'],
+        render: async () => '<div>styled error</div>',
+      },
+    }
+
+    server = await createProdServer({ distDir, appShell, config: config as any })
+    await new Promise<void>(resolve => server.listen(port, resolve))
+  })
+
+  afterAll(async () => {
+    await new Promise(resolve => server.close(resolve))
+    rmSync(tmpDir, { recursive: true, force: true })
+  })
+
+  it('injects error page CSS links from manifest', async () => {
+    const res = await fetch(`http://localhost:${port}/anything`)
+    const text = await res.text()
+    expect(text).toContain('assets/error.css')
+    expect(text).toContain('<link rel="stylesheet"')
+  })
+})
+
+describe('createProdServer with error page structured result', () => {
+  let tmpDir: string
+  let server: http.Server
+  const port = 9898
+
+  beforeAll(async () => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'vitella-err-structured-'))
+    const distDir = join(tmpDir, 'dist')
+    mkdirSync(join(distDir, 'server'), { recursive: true })
+    mkdirSync(join(distDir, 'client'), { recursive: true })
+
+    writeFileSync(join(distDir, 'server', '_error.js'), 'export default {}')
+
+    const appShell = join(tmpDir, 'app.html')
+    writeFileSync(appShell, '<html><head><!--vitella-title--><!--vitella-head--></head><body><!--vitella-html--></body></html>')
+
+    writeFileSync(join(distDir, 'manifest.json'), JSON.stringify({ pages: {}, apis: {} }))
+    writeFileSync(join(distDir, 'routes.json'), JSON.stringify({
+      pages: [],
+      apis: [],
+      errorPage: { filePath: '_error' },
+    }))
+
+    const config = {
+      adapter: {
+        name: 'test',
+        extensions: ['.js'],
+        render: async () => ({
+          html: '<div>structured error</div>',
+          title: 'Error Page',
+          head: '<meta name="robots" content="noindex">',
+        }),
+      },
+    }
+
+    server = await createProdServer({ distDir, appShell, config: config as any })
+    await new Promise<void>(resolve => server.listen(port, resolve))
+  })
+
+  afterAll(async () => {
+    await new Promise(resolve => server.close(resolve))
+    rmSync(tmpDir, { recursive: true, force: true })
+  })
+
+  it('injects title from structured error result', async () => {
+    const res = await fetch(`http://localhost:${port}/gone`)
+    const text = await res.text()
+    expect(text).toContain('Error Page')
+  })
+
+  it('injects head from structured error result', async () => {
+    const res = await fetch(`http://localhost:${port}/gone`)
+    const text = await res.text()
+    expect(text).toContain('noindex')
+  })
+})
+
+describe('createProdServer with error page fallback when module missing', () => {
+  let tmpDir: string
+  let server: http.Server
+  const port = 9899
+
+  beforeAll(async () => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'vitella-err-fb-'))
+    const distDir = join(tmpDir, 'dist')
+    mkdirSync(distDir, { recursive: true })
+    mkdirSync(join(distDir, 'client'), { recursive: true })
+
+    // No _error.js file — module import will fail
+    writeFileSync(join(distDir, 'manifest.json'), JSON.stringify({ pages: {}, apis: {} }))
+    writeFileSync(join(distDir, 'routes.json'), JSON.stringify({
+      pages: [],
+      apis: [],
+      errorPage: { filePath: '_error' },
+    }))
+
+    const config = {
+      adapter: {
+        name: 'test',
+        extensions: ['.js'],
+        render: async () => '<div>should not appear</div>',
+      },
+    }
+
+    server = await createProdServer({ distDir, appShell: join(tmpDir, 'app.html'), config: config as any })
+    await new Promise<void>(resolve => server.listen(port, resolve))
+  })
+
+  afterAll(async () => {
+    await new Promise(resolve => server.close(resolve))
+    rmSync(tmpDir, { recursive: true, force: true })
+  })
+
+  it('falls back to default error page when _error.js module does not exist', async () => {
+    const res = await fetch(`http://localhost:${port}/nowhere`)
+    expect(res.status).toBe(404)
+    const text = await res.text()
+    expect(text).toContain('<h1>404</h1>')
+  })
+})
+
+describe('createProdServer with error page and no adapter', () => {
+  let tmpDir: string
+  let server: http.Server
+  const port = 9900
+
+  beforeAll(async () => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'vitella-err-no-adptr-'))
+    const distDir = join(tmpDir, 'dist')
+    mkdirSync(distDir, { recursive: true })
+    mkdirSync(join(distDir, 'client'), { recursive: true })
+
+    writeFileSync(join(distDir, 'manifest.json'), JSON.stringify({ pages: {}, apis: {} }))
+    writeFileSync(join(distDir, 'routes.json'), JSON.stringify({
+      pages: [],
+      apis: [],
+      errorPage: { filePath: '_error' },
+    }))
+
+    server = await createProdServer({ distDir, appShell: join(tmpDir, 'app.html') })
+    await new Promise<void>(resolve => server.listen(port, resolve))
+  })
+
+  afterAll(async () => {
+    await new Promise(resolve => server.close(resolve))
+    rmSync(tmpDir, { recursive: true, force: true })
+  })
+
+  it('returns default error page when no adapter is configured', async () => {
+    const res = await fetch(`http://localhost:${port}/nope`)
+    expect(res.status).toBe(404)
+    const text = await res.text()
+    expect(text).toContain('<h1>404</h1>')
+  })
+})
+
 describe('createProdServer with image TTL config', () => {
   let tmpDir: string
   let server: http.Server

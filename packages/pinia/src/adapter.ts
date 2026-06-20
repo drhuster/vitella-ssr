@@ -2,6 +2,10 @@ import type { Adapter } from '@vitella-ssr/core'
 import { vueAdapter } from '@vitella-ssr/vue'
 import { createPiniaSSR } from './server.js'
 
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
 export const piniaVueAdapter: Adapter = {
   ...vueAdapter,
   name: 'pinia-vue',
@@ -42,13 +46,13 @@ export const piniaVueAdapter: Adapter = {
     if (headData.meta) {
       head += headData.meta
         .map((m: any) =>
-          `<meta${m.charset ? ` charset="${m.charset}"` : ''}${m.name ? ` name="${m.name}"` : ''}${m.property ? ` property="${m.property}"` : ''}${m.content ? ` content="${m.content}"` : ''}>`
+          `<meta${m.charset ? ` charset="${escapeHtml(m.charset)}"` : ''}${m.name ? ` name="${escapeHtml(m.name)}"` : ''}${m.property ? ` property="${escapeHtml(m.property)}"` : ''}${m.content ? ` content="${escapeHtml(m.content)}"` : ''}>`
         )
         .join('\n  ')
     }
     if (headData.link) {
       head += headData.link
-        .map((l: any) => `<link rel="${l.rel}" href="${l.href}">`)
+        .map((l: any) => `<link rel="${escapeHtml(l.rel)}" href="${escapeHtml(l.href)}">`)
         .join('\n  ')
     }
 
@@ -60,6 +64,12 @@ export const piniaVueAdapter: Adapter = {
   },
 
   getClientEntry(page: string, pagePath: string, layout?: string): string {
+    if (!/^[a-zA-Z0-9_./@[\]-]+$/.test(pagePath)) {
+      throw new Error(`Invalid pagePath: ${pagePath}`)
+    }
+    if (layout && !/^[a-zA-Z0-9_./@[\]-]+$/.test(layout)) {
+      throw new Error(`Invalid layout: ${layout}`)
+    }
     if (layout) {
       return [
         `import { createSSRApp, h } from 'vue'`,

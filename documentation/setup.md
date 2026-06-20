@@ -26,6 +26,8 @@ npm run dev
 my-app/
 ├── src/
 │   ├── pages/          # Page routes (server-rendered HTML)
+│   │   ├── _error.vue  → Error page (404, 500, etc.)
+│   │   ├── _layout.vue → Shared layout (wraps sibling/subtree pages)
 │   │   ├── index.vue   → GET /
 │   │   ├── about.vue   → GET /about
 │   │   ├── blog/
@@ -117,8 +119,10 @@ Files become URL paths automatically:
 | `src/pages/blog/index.vue` | `/blog` |
 | `src/pages/blog/[slug].vue` | `/blog/:slug` |
 | `src/pages/blog/[year]/[slug].vue` | `/blog/:year/:slug` |
+| `src/pages/_layout.vue` | _(shared layout, no route)_ |
+| `src/pages/_error.vue` | _(error page, no route)_ |
 
-Pages are server-rendered to full HTML with client hydration.
+Pages are server-rendered to full HTML with client hydration. `_layout.vue` and `_error.vue` are special files — they are not registered as routes.
 
 ### API Routes (`src/server/`)
 
@@ -146,6 +150,55 @@ export const post = async (req, res, ctx) => {
   return { status: 201, body: { id: 2, name: data.name } }
 }
 ```
+
+### Error Pages
+
+When a request doesn't match any route, or when a page's `load` function throws, Vitella renders an error page with the appropriate HTTP status code.
+
+**Default behavior:** A built-in error page is used automatically — no setup required.
+
+**Custom error page:** Create `src/pages/_error.{ext}` (same extension as your pages) to override the default:
+
+```vue
+<!-- src/pages/_error.vue -->
+<script>
+export const load = async ({ req, params, query, cookies }) => {
+  // Custom error logic (logging, etc.)
+  return {}
+}
+</script>
+
+<template>
+  <main class="error-page">
+    <h1>{{ statusCode }}</h1>
+    <p>{{ statusMessage }}</p>
+    <p>{{ url }}</p>
+  </main>
+</template>
+
+<script setup>
+defineProps(['statusCode', 'statusMessage', 'url'])
+</script>
+```
+
+**Error page props:**
+
+| Prop | Type | Description |
+|------|------|-------------|
+| `statusCode` | `number` | HTTP status code (e.g. `404`, `500`) |
+| `statusMessage` | `string` | HTTP status text (e.g. `"Not Found"`, `"Internal Server Error"`) |
+| `url` | `string` | The URL that triggered the error |
+
+**Layout support:** Error pages are wrapped in the nearest `_layout` file, just like regular pages. If you have a site-wide layout, your error page inherits the header/footer automatically.
+
+**Error conditions:**
+
+| Condition | Status Code |
+|-----------|-------------|
+| No route matches the URL | `404` |
+| Page `load()` throws or returns an error | `500` |
+| SSR render throws | `500` |
+| Request body exceeds 10MB | `413` (bypasses error page) |
 
 ## Data Loading
 
@@ -338,8 +391,12 @@ vitellaPlugin({
 ```
 Dev mode:
   Request → Vite Dev Server
-           → Route match (page or API)
-           → Adapter renders component
+           → Route match?
+             → Yes: page or API handler
+             → No: error page (404)
+           → load() throws?
+             → Yes: error page (500)
+           → Adapter renders component / error page
            → Core injects into HTML shell
            → Response
 
@@ -349,6 +406,7 @@ Production:
                 → Match route in manifest
                 → Load pre-built server chunk
                 → Adapter renders / API handler executes
+                → Error? Render error page
                 → Response
 ```
 

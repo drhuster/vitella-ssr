@@ -75,7 +75,13 @@ function parseCookieHeader(header?: string): Record<string, string> {
     } else {
       const name = pair.slice(0, idx).trim()
       const value = pair.slice(idx + 1).trim()
-      if (name) result[name] = value
+      if (name) {
+        try {
+          result[name] = decodeURIComponent(value)
+        } catch {
+          result[name] = value
+        }
+      }
     }
   }
   return result

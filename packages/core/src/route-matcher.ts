@@ -4,6 +4,7 @@ export function matchRoute(url: string, routes: Route[]): { route: Route; params
   const pathname = url.split('?')[0].split('#')[0]
 
   for (const route of routes) {
+    if (!route.pattern.test(pathname)) continue
     const match = pathname.match(route.pattern)
     if (match) {
       const params: Record<string, string> = {}

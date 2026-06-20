@@ -349,15 +349,16 @@ describe('SSR middleware', () => {
     expect(next).toHaveBeenCalledTimes(1)
   })
 
-  it('calls next() when URL does not match any page or API route', async () => {
+  it('calls handleRequest when URL does not match any page or API route', async () => {
     const mw = await setupSsrMiddleware({
       pages: [{ path: '/about', pattern: /^\/about/, filePath: 'src/pages/about.vue', paramNames: [], type: 'page' as const }],
     })
     const req = { url: '/unknown' }
-    const res = {}
+    const res = { statusCode: 200, end: vi.fn(), setHeader: vi.fn() }
     const next = vi.fn()
     await mw(req, res, next)
-    expect(next).toHaveBeenCalledTimes(1)
+    expect(handleRequest).toHaveBeenCalled()
+    expect(next).not.toHaveBeenCalled()
   })
 
   it('calls handleRequest for matching page routes', async () => {

@@ -100,6 +100,7 @@ async function handleErrorPage(
   const errUrl = req.url || '/'
 
   if (config.adapter && manifest.errorPage) {
+    res.statusCode = statusCode
     try {
       const mod = await vite.ssrLoadModule(manifest.errorPage.filePath)
       const loadData: Record<string, unknown> = {
@@ -134,9 +135,19 @@ async function handleErrorPage(
       const title = resultData ? raw.title : undefined
       const head = resultData ? raw.head : undefined
 
+      const scriptUrl = config.adapter.getClientEntry
+        ? virtualClientUrl(manifest.errorPage.filePath)
+        : undefined
+
       flushCookies(res, ctx.cookies)
       const template = loadHtmlShell(resolvePath(vite.config.root, config.appShell))
-      const fullHtml = renderHtmlShell(template, { html, title, head })
+      const fullHtml = renderHtmlShell(template, {
+        html,
+        title,
+        head,
+        state: Object.keys(loadData).length > 0 ? loadData : undefined,
+        scripts: scriptUrl ? [scriptUrl] : undefined,
+      })
       res.setHeader('Content-Type', 'text/html')
       res.end(fullHtml)
       return

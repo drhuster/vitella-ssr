@@ -314,6 +314,7 @@ async function renderErrorPage(
   const errUrl = req.url || '/'
 
   if (config?.adapter && errorFile) {
+    res.statusCode = statusCode
     try {
       const modPath = path.join(distDir, 'server', '_error.js')
       const mod = await import(modPath)
@@ -322,6 +323,8 @@ async function renderErrorPage(
         statusMessage,
         url: errUrl,
       }
+
+      const ctx = parseRequestContext(req, {})
 
       let layoutComponent: any = undefined
       if (errorLayout) {
@@ -332,6 +335,13 @@ async function renderErrorPage(
         const layoutModPath = path.join(distDir, 'server', `${layoutSafeName}.js`)
         try {
           const layoutMod = await import(layoutModPath)
+          if (typeof layoutMod.load === 'function') {
+            const result = await layoutMod.load({ req, ...ctx })
+            if (result) {
+              const { ttl: _ttl, __proto__: _p, constructor: _c, prototype: _pt, ...rest } = result
+              Object.assign(loadData, rest)
+            }
+          }
           layoutComponent = layoutMod.default
         } catch {}
       }
@@ -356,6 +366,8 @@ async function renderErrorPage(
       if (entry?.css) {
         headParts.push(entry.css.map((f: string) => `<link rel="stylesheet" href="/${f}">`).join('\n  '))
       }
+
+      flushCookies(res, ctx.cookies)
 
       try {
         const template = loadHtmlShell(appShell || '')

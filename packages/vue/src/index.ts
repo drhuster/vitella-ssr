@@ -10,6 +10,12 @@ export const vueAdapter: Adapter = {
     return renderVueComponent(component, loadData, layout)
   },
   getClientEntry(page: string, pagePath: string, layout?: string): string {
+    if (!/^[a-zA-Z0-9_./@[\]-]+$/.test(pagePath)) {
+      throw new Error(`Invalid pagePath: ${pagePath}`)
+    }
+    if (layout && !/^[a-zA-Z0-9_./@[\]-]+$/.test(layout)) {
+      throw new Error(`Invalid layout: ${layout}`)
+    }
     if (layout) {
       return [
         `import { createSSRApp, h } from 'vue'`,

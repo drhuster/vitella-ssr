@@ -209,4 +209,107 @@ describe('handleRequest', () => {
     await handleRequest(req, res, vite, state)
     expect(res.setHeader).toHaveBeenCalledWith('Cache-Control', 'public, max-age=3600')
   })
+
+  it('renders custom error page when adapter and errorPage exist', async () => {
+    state.config.adapter = {
+      name: 'test',
+      extensions: ['.vue'],
+      render: vi.fn().mockResolvedValue('<div>Custom Error</div>'),
+    }
+    state.manifest.errorPage = { filePath: 'src/pages/_error.vue' }
+    vi.mocked(matchRoute).mockReturnValue(null)
+    vite.ssrLoadModule.mockResolvedValue({ default: 'ErrorComponent' })
+    await handleRequest(req, res, vite, state)
+    expect(vite.ssrLoadModule).toHaveBeenCalledWith('src/pages/_error.vue')
+    expect(state.config.adapter.render).toHaveBeenCalledWith(
+      expect.objectContaining({ component: 'ErrorComponent', loadData: { statusCode: 404, statusMessage: 'Not Found', url: '/' } })
+    )
+    expect(res.statusCode).toBe(404)
+    expect(res.end).toHaveBeenCalled()
+  })
+
+  it('renders custom error page with layout', async () => {
+    state.config.adapter = {
+      name: 'test',
+      extensions: ['.vue'],
+      render: vi.fn().mockResolvedValue('<div>Layout Error</div>'),
+    }
+    state.manifest.errorPage = { filePath: 'src/pages/_error.vue', layout: 'src/pages/_layout.vue' }
+    vi.mocked(matchRoute).mockReturnValue(null)
+    vite.ssrLoadModule.mockImplementation(async (path: string) => {
+      if (path === 'src/pages/_layout.vue') return { default: 'LayoutComponent', load: vi.fn() }
+      if (path === 'src/pages/_error.vue') return { default: 'ErrorComponent' }
+      return {}
+    })
+    await handleRequest(req, res, vite, state)
+    expect(vite.ssrLoadModule).toHaveBeenCalledWith('src/pages/_layout.vue')
+    expect(state.config.adapter.render).toHaveBeenCalledWith(
+      expect.objectContaining({ layout: 'LayoutComponent' })
+    )
+    expect(res.statusCode).toBe(404)
+  })
+
+  it('renders custom error page with structured adapter result', async () => {
+    state.config.adapter = {
+      name: 'test',
+      extensions: ['.vue'],
+      render: vi.fn().mockResolvedValue({ html: '<div>Error</div>', title: 'Error Title', head: '<meta name="desc" content="err">' }),
+      getClientEntry: vi.fn(() => 'import {} from "vue"'),
+    }
+    state.manifest.errorPage = { filePath: 'src/pages/_error.vue' }
+    vi.mocked(matchRoute).mockReturnValue(null)
+    vite.ssrLoadModule.mockResolvedValue({ default: 'ErrorComponent' })
+    await handleRequest(req, res, vite, state)
+    expect(state.config.adapter.render).toHaveBeenCalled()
+    expect(res.statusCode).toBe(404)
+    expect(res.end).toHaveBeenCalled()
+  })
+
+  it('includes client entry script for error page when adapter provides getClientEntry', async () => {
+    const htmlShell = await import('../src/html-shell.js')
+    state.config.adapter = {
+      name: 'test',
+      extensions: ['.vue'],
+      render: vi.fn().mockResolvedValue({ html: '<div>Error</div>', title: 'Error Title', head: '<meta>' }),
+      getClientEntry: vi.fn(() => 'import {} from "vue"'),
+    }
+    state.manifest.errorPage = { filePath: 'src/pages/_error.vue' }
+    vi.mocked(matchRoute).mockReturnValue(null)
+    vite.ssrLoadModule.mockResolvedValue({ default: 'ErrorComponent' })
+    await handleRequest(req, res, vite, state)
+    expect(vi.mocked(htmlShell.renderHtmlShell)).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        scripts: [expect.stringContaining('vitella:client-entry:')],
+        state: { statusCode: 404, statusMessage: 'Not Found', url: '/' },
+      })
+    )
+  })
+
+  it('falls back to default error page when adapter.render throws', async () => {
+    state.config.adapter = {
+      name: 'test',
+      extensions: ['.vue'],
+      render: vi.fn().mockRejectedValue(new Error('render failed')),
+    }
+    state.manifest.errorPage = { filePath: 'src/pages/_error.vue' }
+    vi.mocked(matchRoute).mockReturnValue(null)
+    vite.ssrLoadModule.mockResolvedValue({ default: 'ErrorComponent' })
+    await handleRequest(req, res, vite, state)
+    expect(res.statusCode).toBe(404)
+    expect(res.end).toHaveBeenCalledWith('<html><body><h1>404 Not Found</h1><p>/</p></body></html>')
+  })
+
+  it('uses default error page when adapter exists but no errorPage in manifest', async () => {
+    state.config.adapter = {
+      name: 'test',
+      extensions: ['.vue'],
+      render: vi.fn().mockResolvedValue('<div>Should Not Render</div>'),
+    }
+    vi.mocked(matchRoute).mockReturnValue(null)
+    await handleRequest(req, res, vite, state)
+    expect(state.config.adapter.render).not.toHaveBeenCalled()
+    expect(res.statusCode).toBe(404)
+    expect(res.end).toHaveBeenCalledWith('<html><body><h1>404 Not Found</h1><p>/</p></body></html>')
+  })
 })

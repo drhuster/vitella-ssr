@@ -1,5 +1,5 @@
 import type { Plugin, ViteDevServer } from 'vite'
-import { extname, resolve } from 'path'
+import { extname, resolve, sep } from 'path'
 import fs from 'fs'
 import { buildRouteManifest } from './route-manifest.js'
 import { handleRequest, type DevServerState } from './dev-server.js'
@@ -84,7 +84,9 @@ export function vitellaPlugin(userConfig?: Record<string, unknown>): Plugin {
         const adapter = state?.config?.adapter
         if (adapter?.getClientEntry) {
           const route = state?.manifest?.pages.find(r => r.filePath === pagePath)
-          return adapter.getClientEntry(id, pagePath, route?.layout)
+          const errPage = state?.manifest?.errorPage
+          const layout = route?.layout || (errPage?.filePath === pagePath ? errPage?.layout : undefined)
+          return adapter.getClientEntry(id, pagePath, layout)
         }
         return null
       }
@@ -102,7 +104,7 @@ export function vitellaPlugin(userConfig?: Record<string, unknown>): Plugin {
           const relativePath = url.slice('/assets/'.length).split('?')[0]
           const filePath = resolve(assetsDir, relativePath)
 
-          if (!filePath.startsWith(assetsDir)) {
+          if (!filePath.startsWith(assetsDir + sep)) {
             res.statusCode = 403
             res.end('Forbidden')
             return
@@ -133,13 +135,6 @@ export function vitellaPlugin(userConfig?: Record<string, unknown>): Plugin {
 
           // Skip Vite internal paths
           if (url.startsWith('/@') || url.startsWith('/node_modules') || url.startsWith('/__')) {
-            return next()
-          }
-
-          const isPageOrApi = state.manifest.pages.some(r => r.pattern.test(url)) ||
-            state.manifest.apis.some(r => r.pattern.test(url))
-
-          if (!isPageOrApi) {
             return next()
           }
 
