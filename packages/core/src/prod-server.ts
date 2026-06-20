@@ -3,8 +3,8 @@ import fs from 'fs'
 import path from 'path'
 import { matchRoute } from './route-matcher.js'
 import { runMiddleware } from './middleware-chain.js'
-import { loadHtmlShell, renderHtmlShell } from './html-shell.js'
-import type { AdapterRenderResult, BuildManifest, Route, ApiHandlerModule } from './types.js'
+import { loadHtmlShell, renderHtmlShell, renderDefaultErrorPage } from './html-shell.js'
+import type { AdapterRenderResult, BuildManifest, Route, ApiHandlerModule, RouteManifest } from './types.js'
 import type { ResolvedVitellaConfig } from './config.js'
 import { parseRequestContext, flushCookies, type RequestContext } from './request-context.js'
 
@@ -53,9 +53,17 @@ export async function createProdServer(options: ProdServerOptions): Promise<http
   const manifestPath = path.join(distDir, 'manifest.json')
   const manifest: BuildManifest = options.manifest || JSON.parse(fs.readFileSync(manifestPath, 'utf-8'))
   const routesPath = path.join(distDir, 'routes.json')
-  const routes = deserializeRoutes(options.routes || (() => {
+  const rawRoutes = options.routes || (() => {
     try { return JSON.parse(fs.readFileSync(routesPath, 'utf-8')) } catch { return { pages: [], apis: [] } }
-  })())
+  })()
+  const routes = deserializeRoutes(rawRoutes)
+
+  let errorFile: string | undefined
+  let errorLayout: string | undefined
+  if (rawRoutes.errorPage) {
+    errorFile = rawRoutes.errorPage.filePath
+    errorLayout = rawRoutes.errorPage.layout
+  }
   const config = options.config
 
   const clientDir = path.join(distDir, 'client')
@@ -78,32 +86,46 @@ export async function createProdServer(options: ProdServerOptions): Promise<http
     return !!ext && ext !== '.html'
   }
 
+  const MAX_BODY_SIZE = 10 * 1024 * 1024
+
   const server = http.createServer(async (req, res) => {
+    const contentLength = parseInt(req.headers['content-length'] || '0', 10)
+    if (contentLength > MAX_BODY_SIZE) {
+      res.statusCode = 413
+      res.end('Request Entity Too Large')
+      return
+    }
+
     const url = req.url || '/'
 
     // Serve static assets immediately (skip route matching)
     if (isAssetUrl(url)) {
       const rawPath = path.join(clientDir, url)
       const staticPath = path.resolve(rawPath)
-      if (!staticPath.startsWith(path.resolve(clientDir))) {
+      if (!staticPath.startsWith(path.resolve(clientDir) + path.sep)) {
         res.statusCode = 403
         res.end('Forbidden')
         return
       }
-      if (fs.existsSync(staticPath) && fs.statSync(staticPath).isFile()) {
-        const ext = path.extname(staticPath)
-        res.setHeader('Content-Type', mimeTypes[ext] || 'application/octet-stream')
-        const imageTtl = config?.ttl?.images
-        if (imageTtl && imageTtl > 0) {
-          res.setHeader('Cache-Control', `public, max-age=${imageTtl}`)
+      try {
+        const stat = await fs.promises.stat(staticPath)
+        if (stat.isFile()) {
+          const ext = path.extname(staticPath)
+          res.setHeader('Content-Type', mimeTypes[ext] || 'application/octet-stream')
+          const imageTtl = config?.ttl?.images
+          if (imageTtl && imageTtl > 0) {
+            res.setHeader('Cache-Control', `public, max-age=${imageTtl}`)
+          }
+          const stream = fs.createReadStream(staticPath)
+          stream.on('error', () => {
+            res.statusCode = 500
+            res.end('Internal Server Error')
+          })
+          stream.pipe(res)
+          return
         }
-        const stream = fs.createReadStream(staticPath)
-        stream.on('error', () => {
-          res.statusCode = 500
-          res.end('Internal Server Error')
-        })
-        stream.pipe(res)
-        return
+      } catch {
+        // File not found or not accessible — fall through to route matching
       }
     }
 
@@ -152,7 +174,7 @@ export async function createProdServer(options: ProdServerOptions): Promise<http
             function mergeLoadResult(result: Record<string, unknown> | undefined) {
               if (!result) return
               if (result.ttl !== undefined) pageTtl = result.ttl as number
-              const { ttl, ...rest } = result
+              const { ttl, __proto__, constructor, prototype, ...rest } = result
               Object.assign(loadData, rest)
             }
 
@@ -194,11 +216,12 @@ export async function createProdServer(options: ProdServerOptions): Promise<http
                 req,
                 res,
               })
-              const html = isStructuredResult(raw) ? raw.html : raw
-              const title = isStructuredResult(raw) ? raw.title : undefined
+              const resultData = isStructuredResult(raw)
+              const html = resultData ? raw.html : raw
+              const title = resultData ? raw.title : undefined
               const headParts: string[] = []
 
-              if (isStructuredResult(raw) && raw.head) {
+              if (resultData && raw.head) {
                 headParts.push(raw.head)
               }
 
@@ -253,23 +276,111 @@ export async function createProdServer(options: ProdServerOptions): Promise<http
               res.end(html)
               return
             }
-          } catch {
-            res.statusCode = 500
-            res.end('Internal Server Error')
+          } catch (e) {
+            console.error('Error rendering page:', e)
+            await renderErrorPage(500, 'Internal Server Error', req, res, distDir, manifest, errorFile, errorLayout, config, appShell)
             return
           }
         }
 
-        res.statusCode = 404
-        res.end('Not Found')
+        await renderErrorPage(404, 'Not Found', req, res, distDir, manifest, errorFile, errorLayout, config, appShell)
+        return
       })
-    } catch {
-      res.statusCode = 500
-      if (!res.writableEnded) res.end('Internal Server Error')
+    } catch (e) {
+      console.error('Error handling request:', e)
+      if (!res.writableEnded) {
+        await renderErrorPage(500, 'Internal Server Error', req, res, distDir, manifest, errorFile, errorLayout, config, appShell)
+      }
     }
   })
 
+  try { loadHtmlShell(appShell) } catch { /* warm cache on first request */ }
+
   return server
+}
+
+async function renderErrorPage(
+  statusCode: number,
+  statusMessage: string,
+  req: IncomingMessage,
+  res: ServerResponse,
+  distDir: string,
+  manifest: BuildManifest,
+  errorFile: string | undefined,
+  errorLayout: string | undefined,
+  config?: ResolvedVitellaConfig,
+  appShell?: string
+): Promise<void> {
+  const errUrl = req.url || '/'
+
+  if (config?.adapter && errorFile) {
+    try {
+      const modPath = path.join(distDir, 'server', '_error.js')
+      const mod = await import(modPath)
+      const loadData: Record<string, unknown> = {
+        statusCode,
+        statusMessage,
+        url: errUrl,
+      }
+
+      let layoutComponent: any = undefined
+      if (errorLayout) {
+        const layoutSafeName = errorLayout
+          .replace(/\//g, '_')
+          .replace(/\.[^/.]+$/, '')
+          .replace(/^_/, '') || '_layout'
+        const layoutModPath = path.join(distDir, 'server', `${layoutSafeName}.js`)
+        try {
+          const layoutMod = await import(layoutModPath)
+          layoutComponent = layoutMod.default
+        } catch {}
+      }
+
+      const raw = await config.adapter.render({
+        page: errorFile,
+        component: mod.default,
+        layout: layoutComponent,
+        loadData,
+        req,
+        res,
+      })
+
+      const resultData = isStructuredResult(raw)
+      const html = resultData ? raw.html : raw
+      const title = resultData ? raw.title : undefined
+      const head = resultData ? raw.head : undefined
+
+      const entry = manifest.pages['__error__']
+      const headParts: string[] = []
+      if (head) headParts.push(head)
+      if (entry?.css) {
+        headParts.push(entry.css.map((f: string) => `<link rel="stylesheet" href="/${f}">`).join('\n  '))
+      }
+
+      try {
+        const template = loadHtmlShell(appShell || '')
+        const fullHtml = renderHtmlShell(template, {
+          html,
+          title,
+          head: headParts.length > 0 ? headParts.join('\n  ') : undefined,
+          state: Object.keys(loadData).length > 0 ? loadData : undefined,
+        })
+        res.setHeader('Content-Type', 'text/html')
+        res.end(fullHtml)
+        return
+      } catch {
+        res.setHeader('Content-Type', 'text/html')
+        res.end(html)
+        return
+      }
+    } catch (e) {
+      console.error('Error rendering error page:', e)
+    }
+  }
+
+  res.statusCode = statusCode
+  res.setHeader('Content-Type', 'text/html')
+  res.end(renderDefaultErrorPage(statusCode, statusMessage, errUrl))
 }
 
 function buildSafeName(routePath: string, fallback: string): string {
