@@ -20,5 +20,13 @@ export function generateBuildManifest(routes: RouteManifest): BuildManifest {
     }
   }
 
+  if (routes.errorPage) {
+    pages['__error__'] = {
+      clientEntry: `client/assets/_error.js`,
+      serverEntry: `server/_error.js`,
+      css: undefined,
+    }
+  }
+
   return { pages, apis }
 }

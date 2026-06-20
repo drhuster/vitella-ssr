@@ -41,6 +41,30 @@ describe('generateBuildManifest', () => {
     expect(buildManifest.apis).toEqual({})
   })
 
+  it('includes error page entry when errorPage is in route manifest', () => {
+    const routeManifest: RouteManifest = {
+      pages: [
+        { path: '/', pattern: /^\//, paramNames: [], filePath: 'src/pages/index.vue', type: 'page' },
+      ],
+      apis: [],
+      errorPage: { filePath: 'src/pages/_error.vue' },
+    }
+    const buildManifest = generateBuildManifest(routeManifest)
+    expect(buildManifest.pages['__error__']).toBeDefined()
+    expect(buildManifest.pages['__error__'].serverEntry).toContain('_error')
+  })
+
+  it('omits error page entry when no errorPage in route manifest', () => {
+    const routeManifest: RouteManifest = {
+      pages: [
+        { path: '/', pattern: /^\//, paramNames: [], filePath: 'src/pages/index.vue', type: 'page' },
+      ],
+      apis: [],
+    }
+    const buildManifest = generateBuildManifest(routeManifest)
+    expect(buildManifest.pages['__error__']).toBeUndefined()
+  })
+
   it('includes optional css field in page entries', () => {
     const routeManifest: RouteManifest = {
       pages: [
