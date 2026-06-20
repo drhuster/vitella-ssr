@@ -160,6 +160,55 @@ describe('buildRouteManifest', () => {
     expect(manifest.pages[0].layout).toBeUndefined()
   })
 
+  it('excludes _error files from page routes', () => {
+    const pagesDir = join(tmpDir, 'pages')
+    mkdirSync(pagesDir, { recursive: true })
+    writeFileSync(join(pagesDir, '_error.vue'), '')
+    writeFileSync(join(pagesDir, 'index.vue'), '')
+    writeFileSync(join(pagesDir, 'about.vue'), '')
+    const manifest = buildRouteManifest(pagesDir)
+    expect(manifest.pages).toHaveLength(2)
+    expect(manifest.pages.find(r => r.filePath.endsWith('_error.vue'))).toBeFalsy()
+  })
+
+  it('detects _error file in route manifest', () => {
+    const pagesDir = join(tmpDir, 'pages')
+    mkdirSync(pagesDir, { recursive: true })
+    writeFileSync(join(pagesDir, '_error.vue'), '')
+    writeFileSync(join(pagesDir, 'index.vue'), '')
+    const manifest = buildRouteManifest(pagesDir)
+    expect(manifest.errorPage).toBeDefined()
+    expect(manifest.errorPage!.filePath.endsWith('_error.vue')).toBe(true)
+  })
+
+  it('returns undefined errorPage when no _error file exists', () => {
+    const pagesDir = join(tmpDir, 'pages')
+    mkdirSync(pagesDir, { recursive: true })
+    writeFileSync(join(pagesDir, 'index.vue'), '')
+    const manifest = buildRouteManifest(pagesDir)
+    expect(manifest.errorPage).toBeUndefined()
+  })
+
+  it('resolves layout for error page', () => {
+    const pagesDir = join(tmpDir, 'pages')
+    mkdirSync(pagesDir, { recursive: true })
+    writeFileSync(join(pagesDir, '_layout.vue'), '')
+    writeFileSync(join(pagesDir, '_error.vue'), '')
+    writeFileSync(join(pagesDir, 'index.vue'), '')
+    const manifest = buildRouteManifest(pagesDir)
+    expect(manifest.errorPage!.layout).toBeDefined()
+    expect(manifest.errorPage!.layout!.endsWith('_layout.vue')).toBe(true)
+  })
+
+  it('does not resolve layout for error page when no _layout exists', () => {
+    const pagesDir = join(tmpDir, 'pages')
+    mkdirSync(pagesDir, { recursive: true })
+    writeFileSync(join(pagesDir, '_error.vue'), '')
+    writeFileSync(join(pagesDir, 'index.vue'), '')
+    const manifest = buildRouteManifest(pagesDir)
+    expect(manifest.errorPage!.layout).toBeUndefined()
+  })
+
   it('escapes regex special characters in file/directory names', () => {
     const pagesDir = join(tmpDir, 'pages')
     mkdirSync(pagesDir, { recursive: true })

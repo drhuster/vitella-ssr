@@ -66,7 +66,7 @@ export function buildRouteManifest(
         if (!validExts.includes(ext)) continue
 
         const name = basename(entry, ext)
-        if (type === 'page' && name === '_layout') continue
+        if (type === 'page' && (name === '_layout' || name === '_error')) continue
 
         let urlPath = name === 'index' ? baseUrl || '/' : `${baseUrl}/${name}`
         if (urlPath === '') urlPath = '/'
@@ -102,5 +102,27 @@ export function buildRouteManifest(
   const resolvedServerDir = serverDir || join(dirname(pagesDir), 'server')
   scan(resolvedServerDir, '/api', 'api')
 
-  return { pages, apis }
+  let errorPagePath: string | undefined
+  let errorPageLayout: string | undefined
+  const errorExts = pageExtensions || PAGE_EXTENSIONS
+  for (const ext of errorExts) {
+    const errorPath = join(pagesDir, `_error${ext}`)
+    try {
+      if (statSync(errorPath).isFile()) {
+        errorPagePath = errorPath
+        break
+      }
+    } catch {}
+  }
+  if (errorPagePath) {
+    errorPageLayout = resolveLayout(dirname(errorPagePath), pageExtensions || PAGE_EXTENSIONS)
+  }
+
+  return {
+    pages,
+    apis,
+    errorPage: errorPagePath
+      ? { filePath: errorPagePath, layout: errorPageLayout }
+      : undefined,
+  }
 }
