@@ -4,7 +4,7 @@ import path from 'path'
 import { matchRoute } from './route-matcher.js'
 import { runMiddleware } from './middleware-chain.js'
 import { loadHtmlShell, renderHtmlShell, renderDefaultErrorPage } from './html-shell.js'
-import type { AdapterRenderResult, BuildManifest, Route, ApiHandlerModule, RouteManifest } from './types.js'
+import type { AdapterRenderResult, BuildManifest, Route, ApiHandlerModule, ErrorPageInfo } from './types.js'
 import type { ResolvedVitellaConfig } from './config.js'
 import { parseRequestContext, flushCookies, type RequestContext } from './request-context.js'
 
@@ -15,7 +15,7 @@ interface RouteData {
   layout?: string
 }
 
-function deserializeRoutes(data: { pages: RouteData[]; apis: RouteData[] }): { pages: Route[]; apis: Route[] } {
+function deserializeRoutes(data: { pages: RouteData[]; apis: RouteData[]; errorPage?: ErrorPageInfo }): { pages: Route[]; apis: Route[] } {
   const toRoute = (r: RouteData): Route => ({
     path: r.path,
     paramNames: r.paramNames,
@@ -44,7 +44,7 @@ export interface ProdServerOptions {
   distDir: string
   appShell: string
   manifest?: BuildManifest
-  routes?: { pages: RouteData[]; apis: RouteData[] }
+  routes?: { pages: RouteData[]; apis: RouteData[]; errorPage?: ErrorPageInfo }
   config?: ResolvedVitellaConfig
 }
 
@@ -53,7 +53,7 @@ export async function createProdServer(options: ProdServerOptions): Promise<http
   const manifestPath = path.join(distDir, 'manifest.json')
   const manifest: BuildManifest = options.manifest || JSON.parse(fs.readFileSync(manifestPath, 'utf-8'))
   const routesPath = path.join(distDir, 'routes.json')
-  const rawRoutes = options.routes || (() => {
+  const rawRoutes: { pages: RouteData[]; apis: RouteData[]; errorPage?: ErrorPageInfo } = options.routes || (() => {
     try { return JSON.parse(fs.readFileSync(routesPath, 'utf-8')) } catch { return { pages: [], apis: [] } }
   })()
   const routes = deserializeRoutes(rawRoutes)
