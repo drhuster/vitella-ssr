@@ -33,6 +33,12 @@ export interface Route {
 export interface RouteManifest {
   pages: Route[]
   apis: Route[]
+  errorPage?: ErrorPageInfo
+}
+
+export interface ErrorPageInfo {
+  filePath: string
+  layout?: string
 }
 
 export interface RequestContext {
