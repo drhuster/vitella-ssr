@@ -108,11 +108,12 @@ async function handleErrorPage(
         url: errUrl,
       }
 
+      const ctx = parseRequestContext(req, {})
+
       let layoutComponent: any = undefined
       if (manifest.errorPage.layout) {
         const layoutMod = await vite.ssrLoadModule(manifest.errorPage.layout)
         if (typeof layoutMod.load === 'function') {
-          const ctx = parseRequestContext(req, {})
           await layoutMod.load({ req, ...ctx })
         }
         layoutComponent = layoutMod.default
@@ -133,13 +134,14 @@ async function handleErrorPage(
       const title = resultData ? raw.title : undefined
       const head = resultData ? raw.head : undefined
 
+      flushCookies(res, ctx.cookies)
       const template = loadHtmlShell(resolvePath(vite.config.root, config.appShell))
       const fullHtml = renderHtmlShell(template, { html, title, head })
       res.setHeader('Content-Type', 'text/html')
       res.end(fullHtml)
       return
-    } catch {
-      // Fall through to default error page
+    } catch (e) {
+      console.error('Error rendering error page:', e)
     }
   }
 
@@ -229,7 +231,8 @@ async function handlePageRoute(
 
     res.setHeader('Content-Type', 'text/html')
     res.end(fullHtml)
-  } catch (err) {
+  } catch (e) {
+    console.error('Error rendering page:', e)
     await handleErrorPage(500, 'Internal Server Error', req, res, vite, state)
   }
 }
