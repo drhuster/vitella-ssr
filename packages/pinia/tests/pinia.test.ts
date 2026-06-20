@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { createPiniaSSR } from '../src/server.js'
+import { createPiniaSSR } from '../src/index.js'
 
 describe('createPiniaSSR', () => {
   it('creates a pinia instance', () => {
@@ -26,5 +26,25 @@ describe('createPiniaSSR', () => {
     const state = serialize()
     expect(state.users).toEqual({ items: [] })
     expect(state.auth).toEqual({ user: null })
+  })
+})
+
+describe('index exports', () => {
+  it('re-exports createPiniaSSR', async () => {
+    const mod = await import('../src/index.js')
+    expect(mod.createPiniaSSR).toBeDefined()
+    expect(typeof mod.createPiniaSSR).toBe('function')
+  })
+
+  it('re-exports hydratePinia', async () => {
+    const mod = await import('../src/index.js')
+    expect(mod.hydratePinia).toBeDefined()
+    expect(typeof mod.hydratePinia).toBe('function')
+  })
+
+  it('re-exports piniaVueAdapter', async () => {
+    const mod = await import('../src/index.js')
+    expect(mod.piniaVueAdapter).toBeDefined()
+    expect(mod.piniaVueAdapter.name).toBe('pinia-vue')
   })
 })
