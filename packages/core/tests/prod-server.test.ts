@@ -572,3 +572,408 @@ describe('createProdServer with API module that fails to import', () => {
     expect(res.status).toBe(500)
   })
 })
+
+describe('createProdServer with layout data merging', () => {
+  let tmpDir: string
+  let server: http.Server
+  const port = 9886
+
+  beforeAll(async () => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'vitella-layout-'))
+    const distDir = join(tmpDir, 'dist')
+    const serverDir = join(distDir, 'server')
+    mkdirSync(serverDir, { recursive: true })
+    mkdirSync(join(distDir, 'client'), { recursive: true })
+
+    writeFileSync(join(serverDir, 'layout.js'), `
+export const load = async () => {
+  return { layoutMsg: 'from-layout' }
+}
+export default function() { return '' }
+`)
+
+    writeFileSync(join(serverDir, 'hello.js'), `
+export const load = async () => {
+  return { pageMsg: 'from-page' }
+}
+export default function(data) { return '<div>' + JSON.stringify(data) + '</div>' }
+`)
+
+    const appShell = join(tmpDir, 'app.html')
+    writeFileSync(appShell, '<html><head></head><body><!--vitella-html--></body></html>')
+
+    const manifest = {
+      pages: { '/hello': { serverEntry: 'server/hello.js' } },
+      apis: {},
+    }
+    writeFileSync(join(distDir, 'manifest.json'), JSON.stringify(manifest))
+
+    writeFileSync(join(distDir, 'routes.json'), JSON.stringify({
+      pages: [{ path: '/hello', paramNames: [], type: 'page', layout: '_layout' }],
+      apis: [],
+    }))
+
+    server = await createProdServer({ distDir, appShell, manifest })
+    await new Promise<void>(resolve => server.listen(port, resolve))
+  })
+
+  afterAll(async () => {
+    await new Promise(resolve => server.close(resolve))
+    rmSync(tmpDir, { recursive: true, force: true })
+  })
+
+  it('merges layout load data into page load data', async () => {
+    const res = await fetch(`http://localhost:${port}/hello`)
+    const text = await res.text()
+    expect(text).toContain('from-layout')
+    expect(text).toContain('from-page')
+  })
+})
+
+describe('createProdServer with page module import failure', () => {
+  let tmpDir: string
+  let server: http.Server
+  const port = 9887
+
+  beforeAll(async () => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'vitella-pg-err-'))
+    const distDir = join(tmpDir, 'dist')
+    mkdirSync(distDir, { recursive: true })
+    mkdirSync(join(distDir, 'server'), { recursive: true })
+    mkdirSync(join(distDir, 'client'), { recursive: true })
+
+    writeFileSync(join(distDir, 'manifest.json'), JSON.stringify({
+      pages: { '/broken': { serverEntry: 'server/broken.js' } },
+      apis: {},
+    }))
+    writeFileSync(join(distDir, 'routes.json'), JSON.stringify({
+      pages: [{ path: '/broken', paramNames: [], type: 'page' }],
+      apis: [],
+    }))
+
+    server = await createProdServer({ distDir, appShell: join(tmpDir, 'app.html') })
+    await new Promise<void>(resolve => server.listen(port, resolve))
+  })
+
+  afterAll(async () => {
+    await new Promise(resolve => server.close(resolve))
+    rmSync(tmpDir, { recursive: true, force: true })
+  })
+
+  it('returns 500 when page module file does not exist', async () => {
+    const res = await fetch(`http://localhost:${port}/broken`)
+    expect(res.status).toBe(500)
+  })
+})
+
+describe('createProdServer with empty page fallback', () => {
+  let tmpDir: string
+  let server: http.Server
+  const port = 9888
+
+  beforeAll(async () => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'vitella-empty-'))
+    const distDir = join(tmpDir, 'dist')
+    mkdirSync(join(distDir, 'server'), { recursive: true })
+    mkdirSync(join(distDir, 'client'), { recursive: true })
+
+    writeFileSync(join(distDir, 'server', 'empty.js'), 'export default {}')
+
+    const appShell = join(tmpDir, 'app.html')
+    writeFileSync(appShell, '<html><head></head><body><!--vitella-html--></body></html>')
+
+    writeFileSync(join(distDir, 'manifest.json'), JSON.stringify({
+      pages: { '/empty': { serverEntry: 'server/empty.js' } },
+      apis: {},
+    }))
+    writeFileSync(join(distDir, 'routes.json'), JSON.stringify({
+      pages: [{ path: '/empty', paramNames: [], type: 'page' }],
+      apis: [],
+    }))
+
+    server = await createProdServer({ distDir, appShell })
+    await new Promise<void>(resolve => server.listen(port, resolve))
+  })
+
+  afterAll(async () => {
+    await new Promise(resolve => server.close(resolve))
+    rmSync(tmpDir, { recursive: true, force: true })
+  })
+
+  it('returns <div></div> when module has no default function and no render', async () => {
+    const res = await fetch(`http://localhost:${port}/empty`)
+    const text = await res.text()
+    expect(text).toContain('<div></div>')
+  })
+})
+
+describe('createProdServer with page TTL from load', () => {
+  let tmpDir: string
+  let server: http.Server
+  const port = 9889
+
+  beforeAll(async () => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'vitella-ttl-'))
+    const distDir = join(tmpDir, 'dist')
+    mkdirSync(join(distDir, 'server'), { recursive: true })
+    mkdirSync(join(distDir, 'client'), { recursive: true })
+
+    writeFileSync(join(distDir, 'server', 'ttl.js'), `
+export const load = async () => {
+  return { ttl: 300, message: 'cached' }
+}
+export default function(data) { return '<div>' + data.message + '</div>' }
+`)
+
+    const appShell = join(tmpDir, 'app.html')
+    writeFileSync(appShell, '<html><head></head><body><!--vitella-html--></body></html>')
+
+    writeFileSync(join(distDir, 'manifest.json'), JSON.stringify({
+      pages: { '/ttl': { serverEntry: 'server/ttl.js' } },
+      apis: {},
+    }))
+    writeFileSync(join(distDir, 'routes.json'), JSON.stringify({
+      pages: [{ path: '/ttl', paramNames: [], type: 'page' }],
+      apis: [],
+    }))
+
+    server = await createProdServer({ distDir, appShell })
+    await new Promise<void>(resolve => server.listen(port, resolve))
+  })
+
+  afterAll(async () => {
+    await new Promise(resolve => server.close(resolve))
+    rmSync(tmpDir, { recursive: true, force: true })
+  })
+
+  it('sets Cache-Control header from page load ttl', async () => {
+    const res = await fetch(`http://localhost:${port}/ttl`)
+    expect(res.status).toBe(200)
+    expect(res.headers.get('cache-control')).toBe('public, max-age=300')
+  })
+})
+
+describe('createProdServer with options.routes and dynamic route', () => {
+  let tmpDir: string
+  let server: http.Server
+  const port = 9890
+
+  beforeAll(async () => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'vitella-dyn-'))
+    const distDir = join(tmpDir, 'dist')
+    mkdirSync(join(distDir, 'server'), { recursive: true })
+    mkdirSync(join(distDir, 'client'), { recursive: true })
+
+    writeFileSync(join(distDir, 'server', 'hello__name.js'), `
+export const load = async ({ params }) => {
+  return { seenName: params.name }
+}
+export default function(data) { return '<div>' + (data.seenName || 'none') + '</div>' }
+`)
+
+    const appShell = join(tmpDir, 'app.html')
+    writeFileSync(appShell, '<html><head></head><body><!--vitella-html--></body></html>')
+
+    writeFileSync(join(distDir, 'manifest.json'), JSON.stringify({
+      pages: { '/hello/:name': { serverEntry: 'server/hello__name.js' } },
+      apis: {},
+    }))
+
+    server = await createProdServer({
+      distDir,
+      appShell,
+      routes: {
+        pages: [{ path: '/hello/:name', paramNames: ['name'], type: 'page' }],
+        apis: [],
+      },
+    })
+    await new Promise<void>(resolve => server.listen(port, resolve))
+  })
+
+  afterAll(async () => {
+    await new Promise(resolve => server.close(resolve))
+    rmSync(tmpDir, { recursive: true, force: true })
+  })
+
+  it('handles dynamic routes and uses options.routes', async () => {
+    const res = await fetch(`http://localhost:${port}/hello/world`)
+    const text = await res.text()
+    expect(text).toContain('world')
+  })
+})
+
+describe('createProdServer with adapter and non-existent appShell', () => {
+  let tmpDir: string
+  let server: http.Server
+  const port = 9891
+
+  beforeAll(async () => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'vitella-adptr-catch-'))
+    const distDir = join(tmpDir, 'dist')
+    mkdirSync(join(distDir, 'server'), { recursive: true })
+    mkdirSync(join(distDir, 'client'), { recursive: true })
+
+    writeFileSync(join(distDir, 'server', 'index.js'), 'export default {}')
+
+    writeFileSync(join(distDir, 'manifest.json'), JSON.stringify({
+      pages: { '/': { serverEntry: 'server/index.js', clientEntry: 'assets/index.js' } },
+      apis: {},
+    }))
+    writeFileSync(join(distDir, 'routes.json'), JSON.stringify({
+      pages: [{ path: '/', paramNames: [], type: 'page' }],
+      apis: [],
+    }))
+
+    const config = {
+      adapter: {
+        name: 'test',
+        extensions: ['.js'],
+        render: async () => ({ html: '<div>catch-test</div>' }),
+        getClientEntry: () => 'import {} from "vue"',
+      },
+    }
+
+    server = await createProdServer({
+      distDir,
+      appShell: join(tmpDir, 'nonexistent-shell.html'),
+      config: config as any,
+    })
+    await new Promise<void>(resolve => server.listen(port, resolve))
+  })
+
+  afterAll(async () => {
+    await new Promise(resolve => server.close(resolve))
+    rmSync(tmpDir, { recursive: true, force: true })
+  })
+
+  it('returns raw HTML when loadHtmlShell fails with adapter', async () => {
+    const res = await fetch(`http://localhost:${port}/`)
+    const text = await res.text()
+    expect(text).toBe('<div>catch-test</div>')
+  })
+})
+
+describe('createProdServer without adapter and non-existent appShell', () => {
+  let tmpDir: string
+  let server: http.Server
+  const port = 9892
+
+  beforeAll(async () => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'vitella-no-adptr-'))
+    const distDir = join(tmpDir, 'dist')
+    mkdirSync(join(distDir, 'server'), { recursive: true })
+    mkdirSync(join(distDir, 'client'), { recursive: true })
+
+    writeFileSync(join(distDir, 'server', 'index.js'), `
+export default function() { return '<div>no-shell</div>' }
+`)
+
+    writeFileSync(join(distDir, 'manifest.json'), JSON.stringify({
+      pages: { '/': { serverEntry: 'server/index.js' } },
+      apis: {},
+    }))
+    writeFileSync(join(distDir, 'routes.json'), JSON.stringify({
+      pages: [{ path: '/', paramNames: [], type: 'page' }],
+      apis: [],
+    }))
+
+    server = await createProdServer({
+      distDir,
+      appShell: join(tmpDir, 'nonexistent-shell.html'),
+    })
+    await new Promise<void>(resolve => server.listen(port, resolve))
+  })
+
+  afterAll(async () => {
+    await new Promise(resolve => server.close(resolve))
+    rmSync(tmpDir, { recursive: true, force: true })
+  })
+
+  it('returns raw HTML when loadHtmlShell fails without adapter', async () => {
+    const res = await fetch(`http://localhost:${port}/`)
+    const text = await res.text()
+    expect(text).toBe('<div>no-shell</div>')
+  })
+})
+
+describe('createProdServer with layout that fails to import', () => {
+  let tmpDir: string
+  let server: http.Server
+  const port = 9893
+
+  beforeAll(async () => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'vitella-layout-err-'))
+    const distDir = join(tmpDir, 'dist')
+    mkdirSync(join(distDir, 'server'), { recursive: true })
+    mkdirSync(join(distDir, 'client'), { recursive: true })
+
+    writeFileSync(join(distDir, 'server', 'hello.js'), `
+export default function() { return '<div>layout-import-err-ok</div>' }
+`)
+
+    const appShell = join(tmpDir, 'app.html')
+    writeFileSync(appShell, '<html><head></head><body><!--vitella-html--></body></html>')
+
+    writeFileSync(join(distDir, 'manifest.json'), JSON.stringify({
+      pages: { '/hello': { serverEntry: 'server/hello.js' } },
+      apis: {},
+    }))
+    writeFileSync(join(distDir, 'routes.json'), JSON.stringify({
+      pages: [{ path: '/hello', paramNames: [], type: 'page', layout: 'missing_layout' }],
+      apis: [],
+    }))
+
+    server = await createProdServer({ distDir, appShell })
+    await new Promise<void>(resolve => server.listen(port, resolve))
+  })
+
+  afterAll(async () => {
+    await new Promise(resolve => server.close(resolve))
+    rmSync(tmpDir, { recursive: true, force: true })
+  })
+
+  it('still renders page when layout module does not exist', async () => {
+    const res = await fetch(`http://localhost:${port}/hello`)
+    expect(res.status).toBe(200)
+    const text = await res.text()
+    expect(text).toContain('layout-import-err-ok')
+  })
+})
+
+describe('createProdServer with image TTL config', () => {
+  let tmpDir: string
+  let server: http.Server
+  const port = 9894
+
+  beforeAll(async () => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'vitella-img-ttl-'))
+    const distDir = join(tmpDir, 'dist')
+    mkdirSync(distDir, { recursive: true })
+    mkdirSync(join(distDir, 'client'), { recursive: true })
+
+    writeFileSync(join(distDir, 'manifest.json'), JSON.stringify({ pages: {}, apis: {} }))
+
+    // Create a test image in the assets directory
+    const clientAssets = join(distDir, 'client', 'assets')
+    mkdirSync(clientAssets, { recursive: true })
+    writeFileSync(join(clientAssets, 'logo.png'), 'fake-png-data')
+
+    server = await createProdServer({
+      distDir,
+      appShell: join(tmpDir, 'app.html'),
+      config: { ttl: { images: 3600 } } as any,
+    })
+    await new Promise<void>(resolve => server.listen(port, resolve))
+  })
+
+  afterAll(async () => {
+    await new Promise(resolve => server.close(resolve))
+    rmSync(tmpDir, { recursive: true, force: true })
+  })
+
+  it('sets Cache-Control for images when ttl.images is configured', async () => {
+    const res = await fetch(`http://localhost:${port}/assets/logo.png`)
+    expect(res.status).toBe(200)
+    expect(res.headers.get('cache-control')).toBe('public, max-age=3600')
+  })
+})
