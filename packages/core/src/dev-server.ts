@@ -6,23 +6,12 @@ import { runMiddleware } from './middleware-chain.js'
 import { loadHtmlShell, renderHtmlShell } from './html-shell.js'
 import type { ResolvedVitellaConfig } from './config.js'
 import type { AdapterRenderResult, ApiHandlerModule, Route } from './types.js'
+import { parseRequestContext, flushCookies, type RequestContext } from './request-context.js'
 import { resolve as resolvePath } from 'path'
 
 export interface DevServerState {
   manifest: ReturnType<typeof buildRouteManifest>
   config: ResolvedVitellaConfig
-}
-
-function parseCookies(req: IncomingMessage): Record<string, string> {
-  const cookie = req.headers.cookie
-  if (!cookie) return {}
-  return Object.fromEntries(
-    cookie.split(';').map(c => {
-      const idx = c.indexOf('=')
-      if (idx === -1) return [c.trim(), '']
-      return [c.slice(0, idx).trim(), c.slice(idx + 1).trim()]
-    })
-  )
 }
 
 function isStructuredResult(result: any): result is AdapterRenderResult {
@@ -73,17 +62,20 @@ async function handleApiRoute(
   const mod = await vite.ssrLoadModule(route.filePath)
   const method = (req.method || 'GET').toLowerCase() as keyof ApiHandlerModule
   const handler = mod[method] || mod['get']
+  const ctx: RequestContext = parseRequestContext(req, params)
 
   if (!handler) {
     res.statusCode = 405
     res.setHeader('Content-Type', 'application/json')
+    flushCookies(res, ctx.cookies)
     res.end(JSON.stringify({ error: 'Method not allowed' }))
     return
   }
 
-  const result = await handler(req, res, params)
+  const result = await handler(req, res, ctx)
   res.statusCode = result.status || 200
   res.setHeader('Content-Type', 'application/json')
+  flushCookies(res, ctx.cookies)
   res.end(JSON.stringify(result.body))
 }
 
@@ -99,6 +91,7 @@ async function handlePageRoute(
   const mod = await vite.ssrLoadModule(route.filePath)
   const loadData: Record<string, unknown> = {}
   let pageTtl: number | undefined = undefined
+  const ctx: RequestContext = parseRequestContext(req, params)
 
   function mergeLoadResult(result: Record<string, unknown> | undefined) {
     if (!result) return
@@ -111,24 +104,19 @@ async function handlePageRoute(
   if (route.layout) {
     const layoutMod = await vite.ssrLoadModule(route.layout)
     if (typeof layoutMod.load === 'function') {
-      const url = req.url || '/'
-      const queryStr = url.includes('?') ? url.split('?')[1] : ''
-      const query = Object.fromEntries(new URLSearchParams(queryStr))
-      const result = await layoutMod.load({ params, query, cookies: parseCookies(req) })
+      const result = await layoutMod.load({ req, ...ctx })
       mergeLoadResult(result)
     }
     layoutComponent = layoutMod.default
   }
 
   if (typeof mod.load === 'function') {
-    const url = req.url || '/'
-    const queryStr = url.includes('?') ? url.split('?')[1] : ''
-    const query = Object.fromEntries(new URLSearchParams(queryStr))
-    const result = await mod.load({ params, query, cookies: parseCookies(req) })
+    const result = await mod.load({ req, ...ctx })
     mergeLoadResult(result)
   }
 
   if (!config.adapter) {
+    flushCookies(res, ctx.cookies)
     res.setHeader('Content-Type', 'text/html')
     const template = loadHtmlShell(resolvePath(vite.config.root, config.appShell))
     res.end(renderHtmlShell(template, { html: '<div>No adapter configured</div>' }))
@@ -158,6 +146,7 @@ async function handlePageRoute(
     res.setHeader('Cache-Control', `public, max-age=${finalTtl}`)
   }
 
+  flushCookies(res, ctx.cookies)
   const template = loadHtmlShell(resolvePath(vite.config.root, config.appShell))
   const fullHtml = renderHtmlShell(template, {
     html,

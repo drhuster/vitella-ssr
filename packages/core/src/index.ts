@@ -14,6 +14,8 @@ export type {
   HttpMethod,
   ApiHandlerModule,
   BuildManifest,
+  RequestContext,
+  PageLoadContext,
 } from './types.js'
 export { matchRoute } from './route-matcher.js'
 export { renderHtmlShell, loadHtmlShell } from './html-shell.js'
@@ -23,6 +25,9 @@ export { resolveConfig } from './config.js'
 export type { ResolvedVitellaConfig } from './config.js'
 export { createProdServer } from './prod-server.js'
 export type { ProdServerOptions } from './prod-server.js'
+export { Cookies, serializeCookie } from './cookies.js'
+export type { CookieOptions } from './cookies.js'
+export { parseRequestContext, flushCookies } from './request-context.js'
 
 const ASSET_MIME_TYPES: Record<string, string> = {
   '.css': 'text/css',

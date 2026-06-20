@@ -12,17 +12,12 @@ export const load = async () => ({
       <div><strong>Pages:</strong> {{ stats.pages }}</div>
       <div><strong>Uptime:</strong> {{ stats.uptime }}</div>
     </div>
-    <section>
-      <h2>Pinia Counter (shared across pages)</h2>
-      <p>Count: {{ counter.count }}</p>
-      <button @click="counter.increment">+1</button>
-    </section>
+    <counter />
   </main>
 </template>
 
 <script setup>
-import { useCounterStore } from '../stores/counter'
+import counter from '../components/counter.vue';
 defineProps(['stats'])
 
-const counter = useCounterStore()
 </script>

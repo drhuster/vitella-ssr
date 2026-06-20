@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'http'
+import type { Cookies } from './cookies.js'
 
 export interface AdapterRenderResult {
   html: string
@@ -34,6 +35,16 @@ export interface RouteManifest {
   apis: Route[]
 }
 
+export interface RequestContext {
+  params: Record<string, string>
+  query: Record<string, string>
+  cookies: Cookies
+}
+
+export interface PageLoadContext extends RequestContext {
+  req: IncomingMessage
+}
+
 export interface VitellaConfig {
   middleware?: Array<
     (req: IncomingMessage, res: ServerResponse, next: () => Promise<void>) => void | Promise<void>
@@ -52,11 +63,11 @@ export interface VitellaConfig {
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH'
 
 export interface ApiHandlerModule {
-  get?: (req: IncomingMessage, res: ServerResponse, params: Record<string, string>) => Promise<{ status: number; body: unknown }> | { status: number; body: unknown }
-  post?: (req: IncomingMessage, res: ServerResponse, params: Record<string, string>) => Promise<{ status: number; body: unknown }> | { status: number; body: unknown }
-  put?: (req: IncomingMessage, res: ServerResponse, params: Record<string, string>) => Promise<{ status: number; body: unknown }> | { status: number; body: unknown }
-  del?: (req: IncomingMessage, res: ServerResponse, params: Record<string, string>) => Promise<{ status: number; body: unknown }> | { status: number; body: unknown }
-  patch?: (req: IncomingMessage, res: ServerResponse, params: Record<string, string>) => Promise<{ status: number; body: unknown }> | { status: number; body: unknown }
+  get?: (req: IncomingMessage, res: ServerResponse, ctx: RequestContext) => Promise<{ status: number; body: unknown }> | { status: number; body: unknown }
+  post?: (req: IncomingMessage, res: ServerResponse, ctx: RequestContext) => Promise<{ status: number; body: unknown }> | { status: number; body: unknown }
+  put?: (req: IncomingMessage, res: ServerResponse, ctx: RequestContext) => Promise<{ status: number; body: unknown }> | { status: number; body: unknown }
+  del?: (req: IncomingMessage, res: ServerResponse, ctx: RequestContext) => Promise<{ status: number; body: unknown }> | { status: number; body: unknown }
+  patch?: (req: IncomingMessage, res: ServerResponse, ctx: RequestContext) => Promise<{ status: number; body: unknown }> | { status: number; body: unknown }
 }
 
 export interface BuildManifest {

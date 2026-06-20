@@ -6,6 +6,7 @@ import { runMiddleware } from './middleware-chain.js'
 import { loadHtmlShell, renderHtmlShell } from './html-shell.js'
 import type { AdapterRenderResult, BuildManifest, Route, ApiHandlerModule } from './types.js'
 import type { ResolvedVitellaConfig } from './config.js'
+import { parseRequestContext, flushCookies, type RequestContext } from './request-context.js'
 
 interface RouteData {
   path: string
@@ -120,9 +121,11 @@ export async function createProdServer(options: ProdServerOptions): Promise<http
             const method = (req.method || 'GET').toLowerCase() as keyof ApiHandlerModule
             const handler = mod[method] || mod['get']
             if (handler) {
-              const result = await handler(req, res, apiMatch.params)
+              const ctx: RequestContext = parseRequestContext(req, apiMatch.params)
+              const result = await handler(req, res, ctx)
               res.statusCode = result.status || 200
               res.setHeader('Content-Type', 'application/json')
+              flushCookies(res, ctx.cookies)
               res.end(JSON.stringify(result.body))
               return
             }
@@ -155,6 +158,7 @@ export async function createProdServer(options: ProdServerOptions): Promise<http
 
             let layoutComponent: any = undefined
             const layoutPath = pageMatch.route.layout
+            const ctx: RequestContext = parseRequestContext(req, pageMatch.params)
             if (layoutPath) {
               const layoutSafeName = layoutPath
                 .replace(/\//g, '_')
@@ -164,9 +168,7 @@ export async function createProdServer(options: ProdServerOptions): Promise<http
               try {
                 const layoutMod = await import(layoutModPath)
                 if (typeof layoutMod.load === 'function') {
-                  const queryStr = url.includes('?') ? url.split('?')[1] : ''
-                  const query = Object.fromEntries(new URLSearchParams(queryStr))
-                  const result = await layoutMod.load({ params: pageMatch.params, query, cookies: {} })
+                  const result = await layoutMod.load({ req, ...ctx })
                   mergeLoadResult(result)
                 }
                 layoutComponent = layoutMod.default
@@ -174,9 +176,7 @@ export async function createProdServer(options: ProdServerOptions): Promise<http
             }
 
             if (typeof mod.load === 'function') {
-              const queryStr = url.includes('?') ? url.split('?')[1] : ''
-              const query = Object.fromEntries(new URLSearchParams(queryStr))
-              const result = await mod.load({ params: pageMatch.params, query, cookies: {} })
+              const result = await mod.load({ req, ...ctx })
               mergeLoadResult(result)
             }
 
@@ -215,6 +215,7 @@ export async function createProdServer(options: ProdServerOptions): Promise<http
               }
 
               try {
+                flushCookies(res, ctx.cookies)
                 const template = loadHtmlShell(appShell)
                 const fullHtml = renderHtmlShell(template, {
                   html,
@@ -238,6 +239,7 @@ export async function createProdServer(options: ProdServerOptions): Promise<http
             }
 
             try {
+              flushCookies(res, ctx.cookies)
               const template = loadHtmlShell(appShell)
               const fullHtml = renderHtmlShell(template, {
                 html,
