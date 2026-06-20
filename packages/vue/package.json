@@ -1,6 +1,7 @@
 {
   "name": "@vitella-ssr/vue",
   "version": "0.1.0",
+  "description": "A plugin to support Vue in Vitella",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

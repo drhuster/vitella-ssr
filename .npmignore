@@ -1,0 +1,13 @@
+# Ignore test files
+tests/
+*.spec.js
+
+# Ignore build artifacts
+dist/
+build/
+
+# Ignore sensitive configuration files
+config/production.json
+
+# Ignore node_modules
+node_modules/

@@ -1,6 +1,7 @@
 {
   "name": "@vitella-ssr/pinia",
   "version": "0.1.0",
+  "description": "A plugin to support Pinia in Vitella",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -19,14 +20,12 @@
   "peerDependencies": {
     "@vitella-ssr/core": "^0.1.0",
     "@vitella-ssr/vue": "^0.1.0",
-    "pinia": "3.0.4",
-    "vue": "3.5.38"
+    "pinia": "3.0.4"
   },
   "devDependencies": {
     "@vitella-ssr/core": "*",
     "@vitella-ssr/vue": "*",
     "pinia": "3.0.4",
-    "vue": "3.5.38",
     "vitest": "4.1.9",
     "@types/node": "25.9.3"
   }
