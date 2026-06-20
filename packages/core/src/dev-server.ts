@@ -3,7 +3,7 @@ import { IncomingMessage, ServerResponse } from 'http'
 import { buildRouteManifest } from './route-manifest.js'
 import { matchRoute } from './route-matcher.js'
 import { runMiddleware } from './middleware-chain.js'
-import { loadHtmlShell, renderHtmlShell } from './html-shell.js'
+import { loadHtmlShell, renderHtmlShell, renderDefaultErrorPage } from './html-shell.js'
 import type { ResolvedVitellaConfig } from './config.js'
 import type { AdapterRenderResult, ApiHandlerModule, Route } from './types.js'
 import { parseRequestContext, flushCookies, type RequestContext } from './request-context.js'
@@ -22,12 +22,21 @@ function virtualClientUrl(pagePath: string): string {
   return `/@id/__x00__vitella:client-entry:${pagePath}`
 }
 
+const MAX_BODY_SIZE = 10 * 1024 * 1024
+
 export async function handleRequest(
   req: IncomingMessage,
   res: ServerResponse,
   vite: ViteDevServer,
   state: DevServerState
 ): Promise<void> {
+  const contentLength = parseInt(req.headers['content-length'] || '0', 10)
+  if (contentLength > MAX_BODY_SIZE) {
+    res.statusCode = 413
+    res.end('Request Entity Too Large')
+    return
+  }
+
   const url = req.url || '/'
   const { manifest, config } = state
 
@@ -47,8 +56,8 @@ export async function handleRequest(
     }
 
     // No match
-    res.statusCode = 404
-    res.end('Not Found')
+    await handleErrorPage(404, 'Not Found', req, res, vite, state)
+    return
   })
 }
 
@@ -79,6 +88,66 @@ async function handleApiRoute(
   res.end(JSON.stringify(result.body))
 }
 
+async function handleErrorPage(
+  statusCode: number,
+  statusMessage: string,
+  req: IncomingMessage,
+  res: ServerResponse,
+  vite: ViteDevServer,
+  state: DevServerState
+): Promise<void> {
+  const { manifest, config } = state
+  const errUrl = req.url || '/'
+
+  if (config.adapter && manifest.errorPage) {
+    try {
+      const mod = await vite.ssrLoadModule(manifest.errorPage.filePath)
+      const loadData: Record<string, unknown> = {
+        statusCode,
+        statusMessage,
+        url: errUrl,
+      }
+
+      let layoutComponent: any = undefined
+      if (manifest.errorPage.layout) {
+        const layoutMod = await vite.ssrLoadModule(manifest.errorPage.layout)
+        if (typeof layoutMod.load === 'function') {
+          const ctx = parseRequestContext(req, {})
+          await layoutMod.load({ req, ...ctx })
+        }
+        layoutComponent = layoutMod.default
+      }
+
+      const component = mod.default
+      const raw = await config.adapter.render({
+        page: manifest.errorPage.filePath,
+        component,
+        layout: layoutComponent,
+        loadData,
+        req,
+        res,
+      })
+
+      const resultData = isStructuredResult(raw)
+      const html = resultData ? raw.html : raw
+      const title = resultData ? raw.title : undefined
+      const head = resultData ? raw.head : undefined
+
+      const template = loadHtmlShell(resolvePath(vite.config.root, config.appShell))
+      const fullHtml = renderHtmlShell(template, { html, title, head })
+      res.setHeader('Content-Type', 'text/html')
+      res.end(fullHtml)
+      return
+    } catch {
+      // Fall through to default error page
+    }
+  }
+
+  res.statusCode = statusCode
+  res.setHeader('Content-Type', 'text/html')
+  res.end(renderDefaultErrorPage(statusCode, statusMessage, errUrl))
+}
+
 async function handlePageRoute(
   route: Route,
   params: Record<string, string>,
@@ -96,7 +165,7 @@ async function handlePageRoute(
   function mergeLoadResult(result: Record<string, unknown> | undefined) {
     if (!result) return
     if (result.ttl !== undefined) pageTtl = result.ttl as number
-    const { ttl, ...rest } = result
+    const { ttl, __proto__, constructor, prototype, ...rest } = result
     Object.assign(loadData, rest)
   }
 
@@ -115,47 +184,52 @@ async function handlePageRoute(
     mergeLoadResult(result)
   }
 
-  if (!config.adapter) {
+  try {
+    if (!config.adapter) {
+      flushCookies(res, ctx.cookies)
+      res.setHeader('Content-Type', 'text/html')
+      const template = loadHtmlShell(resolvePath(vite.config.root, config.appShell))
+      res.end(renderHtmlShell(template, { html: '<div>No adapter configured</div>' }))
+      return
+    }
+
+    const component = mod.default
+    const raw = await config.adapter.render({
+      page: route.filePath,
+      component,
+      layout: layoutComponent,
+      loadData,
+      req,
+      res,
+    })
+
+    const resultData = isStructuredResult(raw)
+    const html = resultData ? raw.html : raw
+    const title = resultData ? raw.title : undefined
+    const head = resultData ? raw.head : undefined
+
+    const scriptUrl = config.adapter.getClientEntry
+      ? virtualClientUrl(route.filePath)
+      : undefined
+
+    const finalTtl = pageTtl ?? config.ttl?.pages
+    if (finalTtl && finalTtl > 0) {
+      res.setHeader('Cache-Control', `public, max-age=${finalTtl}`)
+    }
+
     flushCookies(res, ctx.cookies)
-    res.setHeader('Content-Type', 'text/html')
     const template = loadHtmlShell(resolvePath(vite.config.root, config.appShell))
-    res.end(renderHtmlShell(template, { html: '<div>No adapter configured</div>' }))
-    return
+    const fullHtml = renderHtmlShell(template, {
+      html,
+      title,
+      head,
+      state: Object.keys(loadData).length > 0 ? loadData : undefined,
+      scripts: scriptUrl ? [scriptUrl] : undefined,
+    })
+
+    res.setHeader('Content-Type', 'text/html')
+    res.end(fullHtml)
+  } catch (err) {
+    await handleErrorPage(500, 'Internal Server Error', req, res, vite, state)
   }
-
-  const component = mod.default
-  const raw = await config.adapter.render({
-    page: route.filePath,
-    component,
-    layout: layoutComponent,
-    loadData,
-    req,
-    res,
-  })
-
-  const html = isStructuredResult(raw) ? raw.html : raw
-  const title = isStructuredResult(raw) ? raw.title : undefined
-  const head = isStructuredResult(raw) ? raw.head : undefined
-
-  const scriptUrl = config.adapter.getClientEntry
-    ? virtualClientUrl(route.filePath)
-    : undefined
-
-  const finalTtl = pageTtl ?? config.ttl?.pages
-  if (finalTtl && finalTtl > 0) {
-    res.setHeader('Cache-Control', `public, max-age=${finalTtl}`)
-  }
-
-  flushCookies(res, ctx.cookies)
-  const template = loadHtmlShell(resolvePath(vite.config.root, config.appShell))
-  const fullHtml = renderHtmlShell(template, {
-    html,
-    title,
-    head,
-    state: Object.keys(loadData).length > 0 ? loadData : undefined,
-    scripts: scriptUrl ? [scriptUrl] : undefined,
-  })
-
-  res.setHeader('Content-Type', 'text/html')
-  res.end(fullHtml)
 }

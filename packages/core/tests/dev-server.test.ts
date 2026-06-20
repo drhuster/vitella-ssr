@@ -16,6 +16,9 @@ vi.mock('../src/html-shell.js', () => ({
     if (data.title) result = result.replace('<!--vitella-head-->', `<title>${data.title}</title>`)
     return result
   }),
+  renderDefaultErrorPage: vi.fn((statusCode: number, statusMessage: string, url: string) =>
+    `<html><body><h1>${statusCode} ${statusMessage}</h1><p>${url}</p></body></html>`
+  ),
 }))
 
 vi.mock('../src/request-context.js', () => ({
@@ -97,7 +100,7 @@ describe('handleRequest', () => {
     vi.mocked(matchRoute).mockReturnValue(null)
     await handleRequest(req, res, vite, state)
     expect(res.statusCode).toBe(404)
-    expect(res.end).toHaveBeenCalledWith('Not Found')
+    expect(res.end).toHaveBeenCalledWith('<html><body><h1>404 Not Found</h1><p>/</p></body></html>')
   })
 
   it('handles API route match', async () => {
