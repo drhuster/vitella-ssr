@@ -48,3 +48,38 @@ export function renderHtmlShell(
 
   return result
 }
+
+export function renderDefaultErrorPage(
+  statusCode: number,
+  statusMessage: string,
+  url: string
+): string {
+  const safeMessage = escapeHtml(statusMessage)
+  const safeUrl = escapeHtml(url)
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>${statusCode} - ${safeMessage}</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; background: #f5f5f5; }
+    .error { text-align: center; }
+    .error h1 { font-size: 6rem; margin: 0; color: #e74c3c; }
+    .error p { font-size: 1.2rem; color: #666; }
+    .error .url { font-size: 0.9rem; color: #999; margin-top: 1rem; }
+  </style>
+</head>
+<body>
+  <div class="error">
+    <h1>${statusCode}</h1>
+    <p>${safeMessage}</p>
+    ${safeUrl ? `<p class="url">${safeUrl}</p>` : ''}
+  </div>
+</body>
+</html>`
+}
+
+function escapeHtml(str: string): string {
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+}

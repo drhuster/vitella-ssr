@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
-import { renderHtmlShell, loadHtmlShell } from '../src/html-shell.js'
+import { renderHtmlShell, loadHtmlShell, renderDefaultErrorPage } from '../src/html-shell.js'
 
 describe('loadHtmlShell', () => {
   it('reads and caches the app.html file', () => {
@@ -120,5 +120,38 @@ describe('renderHtmlShell', () => {
     expect(result).toContain('<div>hello</div>')
     expect(result).toContain('"count":1')
     expect(result).toContain('src="/main.js"')
+  })
+})
+
+describe('renderDefaultErrorPage', () => {
+  it('renders 404 page with status code and message', () => {
+    const html = renderDefaultErrorPage(404, 'Not Found', '/missing')
+    expect(html).toContain('404')
+    expect(html).toContain('Not Found')
+    expect(html).toContain('/missing')
+  })
+
+  it('renders 500 page with status code and message', () => {
+    const html = renderDefaultErrorPage(500, 'Internal Server Error', '/broken')
+    expect(html).toContain('500')
+    expect(html).toContain('Internal Server Error')
+    expect(html).toContain('/broken')
+  })
+
+  it('handles empty URL', () => {
+    const html = renderDefaultErrorPage(404, 'Not Found', '')
+    expect(html).toContain('404')
+    expect(html).toContain('Not Found')
+  })
+
+  it('escapes HTML in status message', () => {
+    const html = renderDefaultErrorPage(500, '<script>alert("xss")</script>', '/test')
+    expect(html).not.toContain('<script>')
+  })
+
+  it('returns a complete HTML document', () => {
+    const html = renderDefaultErrorPage(404, 'Not Found', '/test')
+    expect(html).toMatch(/^<!DOCTYPE html>/)
+    expect(html).toContain('</html>')
   })
 })
