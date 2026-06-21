@@ -114,7 +114,7 @@ async function main() {
         for (const page of routeManifest.pages) {
           const safe = safeName(page.path, 'index')
           const entryPath = resolve(entriesDir, `${safe}.js`)
-          const entrySource = adapter.getClientEntry(page.path, page.filePath)
+          const entrySource = adapter.getClientEntry(page.path, page.filePath, page.layout)
           fs.writeFileSync(entryPath, entrySource, 'utf-8')
           clientInputs[safe] = entryPath
         }
@@ -124,7 +124,7 @@ async function main() {
       const clientExtra = Object.keys(clientInputs).length > 0
         ? { rollupOptions: { input: clientInputs } }
         : {}
-      await build({ root, build: { outDir: 'dist/client', ...clientExtra } })
+      await build({ root, build: { outDir: 'dist/client', manifest: true, ...clientExtra } })
 
       // Build SSR bundles: each page, layout, and API route becomes a separate server entry.
       console.log('Building server...')
@@ -178,12 +178,35 @@ async function main() {
 
       const clientManifestPath = resolve(root, 'dist', 'client', '.vite', 'manifest.json')
       if (fs.existsSync(clientManifestPath)) {
-        const clientManifest = JSON.parse(fs.readFileSync(clientManifestPath, 'utf-8'))
+        const clientManifest = JSON.parse(fs.readFileSync(clientManifestPath, 'utf-8')) as Record<string, { file: string; css?: string[]; imports?: string[] }>
+
+        const chunkCss = new Map<string, string[]>()
+        for (const [manifestKey, info] of Object.entries(clientManifest)) {
+          if (info.css) {
+            chunkCss.set(manifestKey, info.css)
+          }
+        }
+
         for (const [pagePath, entry] of Object.entries(buildManifest.pages)) {
           const safe = safeName(pagePath, 'index')
-          const viteEntry = clientManifest[`assets/${safe}.js`]
-          if (viteEntry?.css) {
-            entry.css = viteEntry.css
+          const entrySrc = `.vitella/entries/pages/${safe}.js`
+          const manifestEntry = clientManifest[entrySrc]
+          if (!manifestEntry) continue
+
+          const allCss = new Set<string>()
+          if (manifestEntry.css) {
+            for (const c of manifestEntry.css) allCss.add(c)
+          }
+          if (manifestEntry.imports) {
+            for (const imp of manifestEntry.imports) {
+              const css = chunkCss.get(imp)
+              if (css) {
+                for (const c of css) allCss.add(c)
+              }
+            }
+          }
+          if (allCss.size > 0) {
+            entry.css = [...allCss]
           }
         }
       }
