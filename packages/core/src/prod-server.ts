@@ -1,19 +1,27 @@
 import http, { IncomingMessage, ServerResponse } from 'http'
 import fs from 'fs'
 import path from 'path'
-import { promisify } from 'util'
-import { brotliCompress as brotliCompressCb, gzip as gzipCb, deflate as deflateCb, createBrotliCompress, createGzip, createDeflate } from 'zlib'
+import { createBrotliCompress, createGzip, createDeflate } from 'zlib'
 import { Readable, Writable } from 'stream'
 import { matchRoute } from './route-matcher.js'
 import { runMiddleware } from './middleware-chain.js'
 import { loadHtmlShell, renderHtmlShell, renderDefaultErrorPage } from './html-shell.js'
+import { sendShellResponse } from './shell-renderer.js'
 import type { AdapterRenderResult, BuildManifest, Route, ApiHandlerModule, ErrorPageInfo } from './types.js'
 import type { ResolvedVitellaConfig } from './config.js'
 import { parseRequestContext, flushCookies, type RequestContext } from './request-context.js'
-
-const brotliCompress = promisify(brotliCompressCb)
-const gzip = promisify(gzipCb)
-const deflate = promisify(deflateCb)
+import {
+  MAX_BODY_SIZE,
+  MAX_TTL,
+  setSecurityHeaders,
+  compressAndEnd,
+  sendJson,
+  sendHtml,
+  isStructuredResult,
+  sanitizeTtl,
+  mergeLoadResult,
+  safeName,
+} from './response-utils.js'
 
 interface RouteData {
   path: string
@@ -43,71 +51,12 @@ function deserializeRoutes(data: { pages: RouteData[]; apis: RouteData[]; errorP
   return { pages: data.pages.map(toRoute), apis: data.apis.map(toRoute) }
 }
 
-function isStructuredResult(result: any): result is AdapterRenderResult {
-  return typeof result === 'object' && result !== null && typeof result.html === 'string'
-}
-
 export interface ProdServerOptions {
   distDir: string
   appShell: string
   manifest?: BuildManifest
   routes?: { pages: RouteData[]; apis: RouteData[]; errorPage?: ErrorPageInfo }
   config?: ResolvedVitellaConfig
-}
-
-const MAX_BODY_SIZE = 10 * 1024 * 1024
-const MAX_TTL = 31536000
-
-function setSecurityHeaders(res: ServerResponse): void {
-  res.setHeader('X-Content-Type-Options', 'nosniff')
-  res.setHeader('X-Frame-Options', 'DENY')
-  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin')
-  res.setHeader('Strict-Transport-Security', 'max-age=31536000')
-  res.setHeader('Content-Security-Policy', [
-    "default-src 'self'",
-    "script-src 'self' 'unsafe-inline'",
-    "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data:",
-    "font-src 'self'",
-    "connect-src 'self'",
-    "frame-ancestors 'none'",
-    "base-uri 'self'",
-    "form-action 'self'",
-  ].join('; '))
-}
-
-async function compressAndEnd(res: ServerResponse, data: string, contentType: string, req: IncomingMessage): Promise<void> {
-  res.setHeader('Content-Type', contentType)
-  const accept = req.headers['accept-encoding'] || ''
-  try {
-    const buffer = Buffer.from(data, 'utf-8')
-    let compressed: Buffer
-    if (accept.includes('br')) {
-      compressed = await brotliCompress(buffer)
-      res.setHeader('Content-Encoding', 'br')
-    } else if (accept.includes('gzip')) {
-      compressed = await gzip(buffer)
-      res.setHeader('Content-Encoding', 'gzip')
-    } else if (accept.includes('deflate')) {
-      compressed = await deflate(buffer)
-      res.setHeader('Content-Encoding', 'deflate')
-    } else {
-      res.end(data)
-      return
-    }
-    res.removeHeader('Content-Length')
-    res.end(compressed)
-  } catch {
-    res.end(data)
-  }
-}
-
-async function sendJson(res: ServerResponse, data: unknown, req: IncomingMessage): Promise<void> {
-  await compressAndEnd(res, JSON.stringify(data), 'application/json', req)
-}
-
-async function sendHtml(res: ServerResponse, html: string, req: IncomingMessage): Promise<void> {
-  await compressAndEnd(res, html, 'text/html', req)
 }
 
 function sendStaticStream(staticPath: string, mimeType: string, req: IncomingMessage, res: ServerResponse): void {
@@ -150,13 +99,6 @@ function sendStaticStream(staticPath: string, mimeType: string, req: IncomingMes
   }
 }
 
-function sanitizeTtl(ttl: unknown): number | undefined {
-  if (typeof ttl === 'number' && Number.isFinite(ttl) && ttl > 0 && ttl <= MAX_TTL) {
-    return Math.floor(ttl)
-  }
-  return undefined
-}
-
 export async function createProdServer(options: ProdServerOptions): Promise<http.Server> {
   const { distDir, appShell } = options
   const manifestPath = path.join(distDir, 'manifest.json')
@@ -196,7 +138,7 @@ export async function createProdServer(options: ProdServerOptions): Promise<http
   }
 
   const server = http.createServer(async (req, res) => {
-    setSecurityHeaders(res)
+    setSecurityHeaders(res, config?.securityHeaders)
 
     const contentLength = parseInt(req.headers['content-length'] || '0', 10)
     if (contentLength > MAX_BODY_SIZE) {
@@ -207,7 +149,6 @@ export async function createProdServer(options: ProdServerOptions): Promise<http
 
     const url = req.url || '/'
 
-    // Serve static assets immediately (skip route matching)
     if (isAssetUrl(url)) {
       const rawPath = path.join(clientDir, url)
       const staticPath = path.resolve(rawPath)
@@ -236,19 +177,17 @@ export async function createProdServer(options: ProdServerOptions): Promise<http
           return
         }
       } catch {
-        // File not found or not accessible — fall through to route matching
+        // File not found — fall through to route matching
       }
     }
 
-    // Run middleware if configured
     const middleware = config?.middleware || []
     try {
       await runMiddleware(middleware, req, res, async (req, res) => {
-        // Try API routes first (matchRoute with pattern)
         const apiMatch = matchRoute(url, routes.apis)
         if (apiMatch) {
-          const safeName = buildSafeName(apiMatch.route.path, 'api')
-          const modPath = path.join(distDir, 'server', `${safeName}.js`)
+          const safe = safeName(apiMatch.route.path, 'api')
+          const modPath = path.join(distDir, 'server', `${safe}.js`)
           try {
             const mod = await import(modPath)
             const method = (req.method || 'GET').toLowerCase() as keyof ApiHandlerModule
@@ -268,11 +207,10 @@ export async function createProdServer(options: ProdServerOptions): Promise<http
           }
         }
 
-        // Then try page routes (matchRoute with pattern)
         const pageMatch = matchRoute(url, routes.pages)
         if (pageMatch) {
-          const safeName = buildSafeName(pageMatch.route.path, 'index')
-          const modPath = path.join(distDir, 'server', `${safeName}.js`)
+          const safe = safeName(pageMatch.route.path, 'index')
+          const modPath = path.join(distDir, 'server', `${safe}.js`)
           try {
             const mod = await import(modPath)
             let html: string
@@ -281,32 +219,18 @@ export async function createProdServer(options: ProdServerOptions): Promise<http
             const loadData: Record<string, unknown> = {}
             let pageTtl: number | undefined = undefined
 
-            function mergeLoadResult(result: Record<string, unknown> | undefined) {
-              if (!result) return
-              if (result.ttl !== undefined) pageTtl = result.ttl as number
-              for (const key of Object.keys(result)) {
-                if (key === 'ttl' || key === '__proto__' || key === 'constructor' || key === 'prototype') continue
-                const desc = Object.getOwnPropertyDescriptor(result, key)
-                if (desc && desc.enumerable) {
-                  loadData[key] = result[key]
-                }
-              }
-            }
-
             let layoutComponent: any = undefined
             const layoutPath = pageMatch.route.layout
             const ctx: RequestContext = parseRequestContext(req, pageMatch.params)
             if (layoutPath) {
-              const layoutSafeName = layoutPath
-                .replace(/\//g, '_')
-                .replace(/\.[^/.]+$/, '')
-                .replace(/^_/, '') || '_layout'
-              const layoutModPath = path.join(distDir, 'server', `${layoutSafeName}.js`)
+              const layoutSafe = safeName(layoutPath.replace(/\.[^/.]+$/, ''), '_layout')
+              const layoutModPath = path.join(distDir, 'server', `${layoutSafe}.js`)
               try {
                 const layoutMod = await import(layoutModPath)
                 if (typeof layoutMod.load === 'function') {
                   const result = await layoutMod.load({ req, ...ctx })
-                  mergeLoadResult(result)
+                  const ttl = mergeLoadResult(result, loadData)
+                  if (ttl !== undefined) pageTtl = ttl
                 }
                 layoutComponent = layoutMod.default
               } catch {}
@@ -314,7 +238,8 @@ export async function createProdServer(options: ProdServerOptions): Promise<http
 
             if (typeof mod.load === 'function') {
               const result = await mod.load({ req, ...ctx })
-              mergeLoadResult(result)
+              const ttl = mergeLoadResult(result, loadData)
+              if (ttl !== undefined) pageTtl = ttl
             }
 
             const finalTtl = sanitizeTtl(pageTtl ?? config?.ttl?.pages)
@@ -332,7 +257,7 @@ export async function createProdServer(options: ProdServerOptions): Promise<http
                 res,
               })
               const resultData = isStructuredResult(raw)
-              const html = resultData ? raw.html : raw
+              const renderHtml = resultData ? raw.html : raw
               const title = resultData ? raw.title : undefined
               const headParts: string[] = []
 
@@ -352,30 +277,26 @@ export async function createProdServer(options: ProdServerOptions): Promise<http
                 scripts.push(`/${entry.clientEntry}`)
               }
 
-              try {
-                flushCookies(res, ctx.cookies)
-                const template = loadHtmlShell(appShell)
-                const fullHtml = renderHtmlShell(template, {
-                  html,
-                  title,
-                  head: headParts.length > 0 ? headParts.join('\n  ') : undefined,
-                  state: Object.keys(loadData).length > 0 ? loadData : undefined,
-                  scripts: scripts.length > 0 ? scripts : undefined,
-                })
-                await sendHtml(res, fullHtml, req)
-                return
-              } catch {
-                await sendHtml(res, html, req)
-                return
-              }
+              await sendShellResponse({
+                html: renderHtml,
+                title,
+                head: headParts.length > 0 ? headParts.join('\n  ') : undefined,
+                loadData,
+                scripts: scripts.length > 0 ? scripts : undefined,
+                appShell,
+                ctx,
+                res,
+                req,
+              })
+              return
             } else if (typeof mod.default === 'function') {
               html = mod.default(loadData)
             } else {
               html = mod.render ? await mod.render(loadData) : '<div></div>'
             }
 
+            flushCookies(res, ctx.cookies)
             try {
-              flushCookies(res, ctx.cookies)
               const template = loadHtmlShell(appShell)
               const fullHtml = renderHtmlShell(template, {
                 html,
@@ -395,7 +316,6 @@ export async function createProdServer(options: ProdServerOptions): Promise<http
         }
 
         await renderErrorPage(404, 'Not Found', req, res, distDir, manifest, errorFile, errorLayout, config, appShell)
-        return
       })
     } catch (e) {
       console.error('Error handling request:', e)
@@ -405,7 +325,7 @@ export async function createProdServer(options: ProdServerOptions): Promise<http
     }
   })
 
-  try { loadHtmlShell(appShell) } catch { /* warm cache on first request */ }
+  try { loadHtmlShell(appShell) } catch { /* warm cache */ }
 
   return server
 }
@@ -439,24 +359,13 @@ async function renderErrorPage(
 
       let layoutComponent: any = undefined
       if (errorLayout) {
-        const layoutSafeName = errorLayout
-          .replace(/\//g, '_')
-          .replace(/\.[^/.]+$/, '')
-          .replace(/^_/, '') || '_layout'
-        const layoutModPath = path.join(distDir, 'server', `${layoutSafeName}.js`)
+        const layoutSafe = safeName(errorLayout.replace(/\.[^/.]+$/, ''), '_layout')
+        const layoutModPath = path.join(distDir, 'server', `${layoutSafe}.js`)
         try {
           const layoutMod = await import(layoutModPath)
           if (typeof layoutMod.load === 'function') {
             const result = await layoutMod.load({ req, ...ctx })
-            if (result) {
-              for (const key of Object.keys(result)) {
-                if (key === 'ttl' || key === '__proto__' || key === 'constructor' || key === 'prototype') continue
-                const desc = Object.getOwnPropertyDescriptor(result, key)
-                if (desc && desc.enumerable) {
-                  loadData[key] = result[key]
-                }
-              }
-            }
+            mergeLoadResult(result, loadData)
           }
           layoutComponent = layoutMod.default
         } catch {}
@@ -483,22 +392,17 @@ async function renderErrorPage(
         headParts.push(entry.css.map((f: string) => `<link rel="stylesheet" href="/${f}">`).join('\n  '))
       }
 
-      flushCookies(res, ctx.cookies)
-
-      try {
-        const template = loadHtmlShell(appShell || '')
-        const fullHtml = renderHtmlShell(template, {
-          html,
-          title,
-          head: headParts.length > 0 ? headParts.join('\n  ') : undefined,
-          state: Object.keys(loadData).length > 0 ? loadData : undefined,
-        })
-        await compressAndEnd(res, fullHtml, 'text/html', req)
-        return
-      } catch {
-        await compressAndEnd(res, html, 'text/html', req)
-        return
-      }
+      await sendShellResponse({
+        html,
+        title,
+        head: headParts.length > 0 ? headParts.join('\n  ') : undefined,
+        loadData,
+        appShell: appShell || '',
+        ctx,
+        res,
+        req,
+      })
+      return
     } catch (e) {
       console.error('Error rendering error page:', e)
     }
@@ -506,8 +410,4 @@ async function renderErrorPage(
 
   res.statusCode = statusCode
   await compressAndEnd(res, renderDefaultErrorPage(statusCode, statusMessage, errUrl), 'text/html', req)
-}
-
-function buildSafeName(routePath: string, fallback: string): string {
-  return routePath.replace(/\//g, '_').replace(/:/g, '_').replace(/^_/, '') || fallback
 }

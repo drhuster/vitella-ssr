@@ -7,29 +7,36 @@ import { vitellaPlugin } from './index.js'
 import { createProdServer } from './prod-server.js'
 import { buildRouteManifest } from './route-manifest.js'
 import { generateBuildManifest } from './build.js'
+import { safeName } from './response-utils.js'
 
 const command = process.argv[2]
 
-async function detectAdapterPackage(root: string): Promise<string | undefined> {
+async function detectAdapterPackages(root: string): Promise<string[]> {
   try {
     const pkg = JSON.parse(fs.readFileSync(resolve(root, 'package.json'), 'utf-8'))
     const deps = { ...pkg.dependencies, ...pkg.devDependencies }
-    for (const [name] of Object.entries(deps)) {
-      if (name === '@vitella-ssr/vue') return name
-    }
+    return Object.keys(deps).filter(n => n.startsWith('@vitella-ssr/') && n !== '@vitella-ssr/core')
   } catch {}
-  return undefined
+  return []
 }
 
 async function adapterForPackage(name: string): Promise<unknown> {
   if (!name) return undefined
   const mod = await import(name)
-  return mod.vueAdapter || mod.piniaAdapter || undefined
+  for (const key of Object.keys(mod)) {
+    if (key.endsWith('Adapter') || key.endsWith('adapter')) {
+      return mod[key]
+    }
+  }
+  return undefined
 }
 
 async function getAdapter(): Promise<any> {
-  const adapterPkg = await detectAdapterPackage(process.cwd())
-  if (adapterPkg) return adapterForPackage(adapterPkg)
+  const adapterPkgs = await detectAdapterPackages(process.cwd())
+  for (const pkg of adapterPkgs) {
+    const adapter = await adapterForPackage(pkg)
+    if (adapter) return adapter
+  }
   return undefined
 }
 
@@ -79,7 +86,6 @@ async function main() {
       const serverDir = resolve(root, 'src/server')
       const routeManifest = buildRouteManifest(pagesDir, serverDir)
 
-      // Generate per-page client entry files
       const entriesDir = resolve(root, '.vitella', 'entries', 'pages')
       fs.mkdirSync(entriesDir, { recursive: true })
 
@@ -88,38 +94,33 @@ async function main() {
 
       if (adapter?.getClientEntry) {
         for (const page of routeManifest.pages) {
-          const safeName = page.path.replace(/\//g, '_').replace(/:/g, '_').replace(/^_/, '') || 'index'
-          const entryPath = resolve(entriesDir, `${safeName}.js`)
+          const safe = safeName(page.path, 'index')
+          const entryPath = resolve(entriesDir, `${safe}.js`)
           const entrySource = adapter.getClientEntry(page.path, page.filePath)
           fs.writeFileSync(entryPath, entrySource, 'utf-8')
-          clientInputs[safeName] = entryPath
+          clientInputs[safe] = entryPath
         }
       }
 
-      // Build client
       console.log('Building client...')
       const clientExtra = Object.keys(clientInputs).length > 0
         ? { rollupOptions: { input: clientInputs } }
         : {}
       await build({ root, build: { outDir: 'dist/client', ...clientExtra } })
 
-      // Build server (SSR multi-entry)
       console.log('Building server...')
       const ssrInput: Record<string, string> = {}
       for (const page of routeManifest.pages) {
-        const safeName = page.path.replace(/\//g, '_').replace(/:/g, '_').replace(/^_/, '') || 'index'
-        ssrInput[safeName] = page.filePath
+        const safe = safeName(page.path, 'index')
+        ssrInput[safe] = page.filePath
       }
       for (const layoutPath of [...new Set(routeManifest.pages.filter(p => p.layout).map(p => p.layout!))]) {
-        const layoutSafeName = layoutPath
-          .replace(/\//g, '_')
-          .replace(/\.[^/.]+$/, '')
-          .replace(/^_/, '') || '_layout'
-        ssrInput[layoutSafeName] = layoutPath
+        const layoutSafe = safeName(layoutPath.replace(/\.[^/.]+$/, ''), '_layout')
+        ssrInput[layoutSafe] = layoutPath
       }
       for (const api of routeManifest.apis) {
-        const safeName = api.path.replace(/\//g, '_').replace(/:/g, '_').replace(/^_/, '') || 'api_index'
-        ssrInput[safeName] = api.filePath
+        const safe = safeName(api.path, 'api_index')
+        ssrInput[safe] = api.filePath
       }
 
       await build({
@@ -131,18 +132,18 @@ async function main() {
         },
       })
 
-      // Save config for production server
-      const adapterPkg = await detectAdapterPackage(root)
+      const adapterPkgs = await detectAdapterPackages(root)
       const buildConfig: Record<string, unknown> = { appShell: 'src/app.html' }
-      if (adapterPkg) buildConfig.adapter = adapterPkg
+      if (adapterPkgs.length > 0) {
+        buildConfig.adapterPackages = adapterPkgs
+        buildConfig.adapter = adapterPkgs[0]
+      }
 
-      // Extract TTL from vite config if present
       const ttl = await extractTtlFromViteConfig(root)
       if (ttl) buildConfig.ttl = ttl
 
       fs.writeFileSync(resolve(root, 'dist/config.json'), JSON.stringify(buildConfig, null, 2))
 
-      // Copy assets directory to dist/client/assets/
       const assetsDir = resolve(root, 'src/assets')
       if (fs.existsSync(assetsDir)) {
         const distAssetsDir = resolve(root, 'dist/client/assets')
@@ -151,16 +152,14 @@ async function main() {
         console.log('Assets copied to dist/client/assets/')
       }
 
-      // Generate manifests with CSS mapping
       const buildManifest = generateBuildManifest(routeManifest)
 
-      // Map CSS from Vite client manifest
       const clientManifestPath = resolve(root, 'dist', 'client', '.vite', 'manifest.json')
       if (fs.existsSync(clientManifestPath)) {
         const clientManifest = JSON.parse(fs.readFileSync(clientManifestPath, 'utf-8'))
         for (const [pagePath, entry] of Object.entries(buildManifest.pages)) {
-          const safeName = pagePath.replace(/\//g, '_').replace(/:/g, '_').replace(/^_/, '') || 'index'
-          const viteEntry = clientManifest[`assets/${safeName}.js`]
+          const safe = safeName(pagePath, 'index')
+          const viteEntry = clientManifest[`assets/${safe}.js`]
           if (viteEntry?.css) {
             entry.css = viteEntry.css
           }
@@ -181,14 +180,18 @@ async function main() {
     case 'start': {
       const distDir = resolve(root, 'dist')
       const appShell = resolve(root, 'src', 'app.html')
-      let config: { adapter?: unknown; appShell?: string; ttl?: { images?: number; pages?: number } } | undefined
+      let config: { adapter?: unknown; appShell?: string; ttl?: { images?: number; pages?: number }; adapterPackages?: string[] } | undefined
 
       try {
         const buildConfig = JSON.parse(fs.readFileSync(resolve(distDir, 'config.json'), 'utf-8'))
-        if (buildConfig.adapter) {
-          const adapter = await adapterForPackage(buildConfig.adapter)
-          config = { adapter, appShell: buildConfig.appShell || appShell }
-          if (buildConfig.ttl) config.ttl = buildConfig.ttl
+        const pkgs: string[] = buildConfig.adapterPackages || (buildConfig.adapter ? [buildConfig.adapter] : [])
+        for (const pkgName of pkgs) {
+          const adapter = await adapterForPackage(pkgName)
+          if (adapter) {
+            config = { adapter, appShell: buildConfig.appShell || appShell }
+            if (buildConfig.ttl) config.ttl = buildConfig.ttl
+            break
+          }
         }
       } catch {}
 

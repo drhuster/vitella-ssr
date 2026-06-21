@@ -3,6 +3,7 @@ import type { VitellaConfig } from './types.js'
 export interface ResolvedVitellaConfig extends Required<Pick<VitellaConfig, 'pagesDir' | 'serverDir' | 'appShell' | 'assetsDir' | 'ttl'>> {
   middleware: NonNullable<VitellaConfig['middleware']>
   adapter: VitellaConfig['adapter']
+  securityHeaders?: Record<string, string>
 }
 
 export async function resolveConfig(userConfig?: Partial<VitellaConfig>): Promise<ResolvedVitellaConfig> {
@@ -17,5 +18,6 @@ export async function resolveConfig(userConfig?: Partial<VitellaConfig>): Promis
       images: userConfig?.ttl?.images ?? 0,
       pages: userConfig?.ttl?.pages ?? 0,
     },
+    securityHeaders: userConfig?.securityHeaders ?? undefined,
   }
 }

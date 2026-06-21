@@ -64,6 +64,7 @@ export interface VitellaConfig {
     images?: number
     pages?: number
   }
+  securityHeaders?: Record<string, string>
 }
 
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH'
