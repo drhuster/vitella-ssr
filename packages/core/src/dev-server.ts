@@ -1,5 +1,7 @@
 import type { ViteDevServer } from 'vite'
 import { IncomingMessage, ServerResponse } from 'http'
+import { promisify } from 'util'
+import { brotliCompress as brotliCompressCb, gzip as gzipCb, deflate as deflateCb } from 'zlib'
 import { buildRouteManifest } from './route-manifest.js'
 import { matchRoute } from './route-matcher.js'
 import { runMiddleware } from './middleware-chain.js'
@@ -8,6 +10,10 @@ import type { ResolvedVitellaConfig } from './config.js'
 import type { AdapterRenderResult, ApiHandlerModule, Route } from './types.js'
 import { parseRequestContext, flushCookies, type RequestContext } from './request-context.js'
 import { resolve as resolvePath } from 'path'
+
+const brotliCompress = promisify(brotliCompressCb)
+const gzip = promisify(gzipCb)
+const deflate = promisify(deflateCb)
 
 export interface DevServerState {
   manifest: ReturnType<typeof buildRouteManifest>
@@ -24,16 +30,67 @@ function virtualClientUrl(pagePath: string): string {
 
 const MAX_BODY_SIZE = 10 * 1024 * 1024
 
+function setSecurityHeaders(res: ServerResponse): void {
+  res.setHeader('X-Content-Type-Options', 'nosniff')
+  res.setHeader('X-Frame-Options', 'DENY')
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin')
+}
+
+async function compressAndEnd(res: ServerResponse, data: string, contentType: string, req: IncomingMessage): Promise<void> {
+  res.setHeader('Content-Type', contentType)
+  const accept = req.headers['accept-encoding'] || ''
+  try {
+    const buffer = Buffer.from(data, 'utf-8')
+    let compressed: Buffer
+    if (accept.includes('br')) {
+      compressed = await brotliCompress(buffer)
+      res.setHeader('Content-Encoding', 'br')
+    } else if (accept.includes('gzip')) {
+      compressed = await gzip(buffer)
+      res.setHeader('Content-Encoding', 'gzip')
+    } else if (accept.includes('deflate')) {
+      compressed = await deflate(buffer)
+      res.setHeader('Content-Encoding', 'deflate')
+    } else {
+      res.end(data)
+      return
+    }
+    res.removeHeader('Content-Length')
+    res.end(compressed)
+  } catch {
+    res.end(data)
+  }
+}
+
+function sendJson(res: ServerResponse, data: unknown, req: IncomingMessage): void {
+  compressAndEnd(res, JSON.stringify(data), 'application/json', req)
+}
+
+function sendHtml(res: ServerResponse, html: string, req: IncomingMessage): void {
+  compressAndEnd(res, html, 'text/html', req)
+}
+
+const MAX_TTL = 31536000
+
+function sanitizeTtl(ttl: unknown): number | undefined {
+  if (typeof ttl === 'number' && Number.isFinite(ttl) && ttl > 0 && ttl <= MAX_TTL) {
+    return Math.floor(ttl)
+  }
+  return undefined
+}
+
 export async function handleRequest(
   req: IncomingMessage,
   res: ServerResponse,
   vite: ViteDevServer,
   state: DevServerState
 ): Promise<void> {
+  setSecurityHeaders(res)
+
   const contentLength = parseInt(req.headers['content-length'] || '0', 10)
   if (contentLength > MAX_BODY_SIZE) {
     res.statusCode = 413
-    res.end('Request Entity Too Large')
+    compressAndEnd(res, 'Request Entity Too Large', 'text/plain', req)
     return
   }
 
@@ -75,17 +132,15 @@ async function handleApiRoute(
 
   if (!handler) {
     res.statusCode = 405
-    res.setHeader('Content-Type', 'application/json')
     flushCookies(res, ctx.cookies)
-    res.end(JSON.stringify({ error: 'Method not allowed' }))
+    sendJson(res, { error: 'Method not allowed' }, req)
     return
   }
 
   const result = await handler(req, res, ctx)
   res.statusCode = result.status || 200
-  res.setHeader('Content-Type', 'application/json')
   flushCookies(res, ctx.cookies)
-  res.end(JSON.stringify(result.body))
+  sendJson(res, result.body, req)
 }
 
 async function handleErrorPage(
@@ -148,8 +203,7 @@ async function handleErrorPage(
         state: Object.keys(loadData).length > 0 ? loadData : undefined,
         scripts: scriptUrl ? [scriptUrl] : undefined,
       })
-      res.setHeader('Content-Type', 'text/html')
-      res.end(fullHtml)
+      sendHtml(res, fullHtml, req)
       return
     } catch (e) {
       console.error('Error rendering error page:', e)
@@ -157,8 +211,7 @@ async function handleErrorPage(
   }
 
   res.statusCode = statusCode
-  res.setHeader('Content-Type', 'text/html')
-  res.end(renderDefaultErrorPage(statusCode, statusMessage, errUrl))
+  sendHtml(res, renderDefaultErrorPage(statusCode, statusMessage, errUrl), req)
 }
 
 async function handlePageRoute(
@@ -178,8 +231,13 @@ async function handlePageRoute(
   function mergeLoadResult(result: Record<string, unknown> | undefined) {
     if (!result) return
     if (result.ttl !== undefined) pageTtl = result.ttl as number
-    const { ttl, __proto__, constructor, prototype, ...rest } = result
-    Object.assign(loadData, rest)
+    for (const key of Object.keys(result)) {
+      if (key === 'ttl' || key === '__proto__' || key === 'constructor' || key === 'prototype') continue
+      const desc = Object.getOwnPropertyDescriptor(result, key)
+      if (desc && desc.enumerable) {
+        loadData[key] = result[key]
+      }
+    }
   }
 
   let layoutComponent: any = undefined
@@ -200,9 +258,8 @@ async function handlePageRoute(
   try {
     if (!config.adapter) {
       flushCookies(res, ctx.cookies)
-      res.setHeader('Content-Type', 'text/html')
       const template = loadHtmlShell(resolvePath(vite.config.root, config.appShell))
-      res.end(renderHtmlShell(template, { html: '<div>No adapter configured</div>' }))
+      sendHtml(res, renderHtmlShell(template, { html: '<div>No adapter configured</div>' }), req)
       return
     }
 
@@ -225,8 +282,8 @@ async function handlePageRoute(
       ? virtualClientUrl(route.filePath)
       : undefined
 
-    const finalTtl = pageTtl ?? config.ttl?.pages
-    if (finalTtl && finalTtl > 0) {
+    const finalTtl = sanitizeTtl(pageTtl ?? config.ttl?.pages)
+    if (finalTtl !== undefined && finalTtl > 0) {
       res.setHeader('Cache-Control', `public, max-age=${finalTtl}`)
     }
 
@@ -240,8 +297,7 @@ async function handlePageRoute(
       scripts: scriptUrl ? [scriptUrl] : undefined,
     })
 
-    res.setHeader('Content-Type', 'text/html')
-    res.end(fullHtml)
+    sendHtml(res, fullHtml, req)
   } catch (e) {
     console.error('Error rendering page:', e)
     await handleErrorPage(500, 'Internal Server Error', req, res, vite, state)

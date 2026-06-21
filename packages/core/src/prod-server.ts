@@ -1,12 +1,18 @@
 import http, { IncomingMessage, ServerResponse } from 'http'
 import fs from 'fs'
 import path from 'path'
+import { promisify } from 'util'
+import { brotliCompress as brotliCompressCb, gzip as gzipCb, deflate as deflateCb, createBrotliCompress, createGzip, createDeflate } from 'zlib'
 import { matchRoute } from './route-matcher.js'
 import { runMiddleware } from './middleware-chain.js'
 import { loadHtmlShell, renderHtmlShell, renderDefaultErrorPage } from './html-shell.js'
 import type { AdapterRenderResult, BuildManifest, Route, ApiHandlerModule, ErrorPageInfo } from './types.js'
 import type { ResolvedVitellaConfig } from './config.js'
 import { parseRequestContext, flushCookies, type RequestContext } from './request-context.js'
+
+const brotliCompress = promisify(brotliCompressCb)
+const gzip = promisify(gzipCb)
+const deflate = promisify(deflateCb)
 
 interface RouteData {
   path: string
@@ -48,6 +54,78 @@ export interface ProdServerOptions {
   config?: ResolvedVitellaConfig
 }
 
+const MAX_BODY_SIZE = 10 * 1024 * 1024
+const MAX_TTL = 31536000
+
+function setSecurityHeaders(res: ServerResponse): void {
+  res.setHeader('X-Content-Type-Options', 'nosniff')
+  res.setHeader('X-Frame-Options', 'DENY')
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin')
+}
+
+async function compressAndEnd(res: ServerResponse, data: string, contentType: string, req: IncomingMessage): Promise<void> {
+  res.setHeader('Content-Type', contentType)
+  const accept = req.headers['accept-encoding'] || ''
+  try {
+    const buffer = Buffer.from(data, 'utf-8')
+    let compressed: Buffer
+    if (accept.includes('br')) {
+      compressed = await brotliCompress(buffer)
+      res.setHeader('Content-Encoding', 'br')
+    } else if (accept.includes('gzip')) {
+      compressed = await gzip(buffer)
+      res.setHeader('Content-Encoding', 'gzip')
+    } else if (accept.includes('deflate')) {
+      compressed = await deflate(buffer)
+      res.setHeader('Content-Encoding', 'deflate')
+    } else {
+      res.end(data)
+      return
+    }
+    res.removeHeader('Content-Length')
+    res.end(compressed)
+  } catch {
+    res.end(data)
+  }
+}
+
+function sendJson(res: ServerResponse, data: unknown, req: IncomingMessage): void {
+  compressAndEnd(res, JSON.stringify(data), 'application/json', req)
+}
+
+function sendHtml(res: ServerResponse, html: string, req: IncomingMessage): void {
+  compressAndEnd(res, html, 'text/html', req)
+}
+
+function sendStaticStream(staticPath: string, mimeType: string, req: IncomingMessage, res: ServerResponse): void {
+  res.setHeader('Content-Type', mimeType)
+  const accept = req.headers['accept-encoding'] || ''
+  const stream = fs.createReadStream(staticPath)
+  stream.on('error', () => {
+    res.statusCode = 500
+    compressAndEnd(res, 'Internal Server Error', 'text/plain', req)
+  })
+  if (accept.includes('br')) {
+    res.setHeader('Content-Encoding', 'br')
+    stream.pipe(createBrotliCompress()).pipe(res)
+  } else if (accept.includes('gzip')) {
+    res.setHeader('Content-Encoding', 'gzip')
+    stream.pipe(createGzip()).pipe(res)
+  } else if (accept.includes('deflate')) {
+    res.setHeader('Content-Encoding', 'deflate')
+    stream.pipe(createDeflate()).pipe(res)
+  } else {
+    stream.pipe(res)
+  }
+}
+
+function sanitizeTtl(ttl: unknown): number | undefined {
+  if (typeof ttl === 'number' && Number.isFinite(ttl) && ttl > 0 && ttl <= MAX_TTL) {
+    return Math.floor(ttl)
+  }
+  return undefined
+}
+
 export async function createProdServer(options: ProdServerOptions): Promise<http.Server> {
   const { distDir, appShell } = options
   const manifestPath = path.join(distDir, 'manifest.json')
@@ -86,13 +164,13 @@ export async function createProdServer(options: ProdServerOptions): Promise<http
     return !!ext && ext !== '.html'
   }
 
-  const MAX_BODY_SIZE = 10 * 1024 * 1024
-
   const server = http.createServer(async (req, res) => {
+    setSecurityHeaders(res)
+
     const contentLength = parseInt(req.headers['content-length'] || '0', 10)
     if (contentLength > MAX_BODY_SIZE) {
       res.statusCode = 413
-      res.end('Request Entity Too Large')
+      compressAndEnd(res, 'Request Entity Too Large', 'text/plain', req)
       return
     }
 
@@ -104,24 +182,26 @@ export async function createProdServer(options: ProdServerOptions): Promise<http
       const staticPath = path.resolve(rawPath)
       if (!staticPath.startsWith(path.resolve(clientDir) + path.sep)) {
         res.statusCode = 403
-        res.end('Forbidden')
+        compressAndEnd(res, 'Forbidden', 'text/plain', req)
         return
       }
       try {
         const stat = await fs.promises.stat(staticPath)
         if (stat.isFile()) {
           const ext = path.extname(staticPath)
-          res.setHeader('Content-Type', mimeTypes[ext] || 'application/octet-stream')
+          const mimeType = mimeTypes[ext] || 'application/octet-stream'
           const imageTtl = config?.ttl?.images
           if (imageTtl && imageTtl > 0) {
             res.setHeader('Cache-Control', `public, max-age=${imageTtl}`)
           }
-          const stream = fs.createReadStream(staticPath)
-          stream.on('error', () => {
-            res.statusCode = 500
-            res.end('Internal Server Error')
-          })
-          stream.pipe(res)
+          const etag = `"${stat.mtimeMs}-${stat.size}"`
+          if (req.headers['if-none-match'] === etag) {
+            res.statusCode = 304
+            res.end()
+            return
+          }
+          res.setHeader('ETag', etag)
+          sendStaticStream(staticPath, mimeType, req, res)
           return
         }
       } catch {
@@ -146,14 +226,13 @@ export async function createProdServer(options: ProdServerOptions): Promise<http
               const ctx: RequestContext = parseRequestContext(req, apiMatch.params)
               const result = await handler(req, res, ctx)
               res.statusCode = result.status || 200
-              res.setHeader('Content-Type', 'application/json')
               flushCookies(res, ctx.cookies)
-              res.end(JSON.stringify(result.body))
+              sendJson(res, result.body, req)
               return
             }
           } catch {
             res.statusCode = 500
-            res.end('Internal Server Error')
+            compressAndEnd(res, 'Internal Server Error', 'text/plain', req)
             return
           }
         }
@@ -174,8 +253,13 @@ export async function createProdServer(options: ProdServerOptions): Promise<http
             function mergeLoadResult(result: Record<string, unknown> | undefined) {
               if (!result) return
               if (result.ttl !== undefined) pageTtl = result.ttl as number
-              const { ttl, __proto__, constructor, prototype, ...rest } = result
-              Object.assign(loadData, rest)
+              for (const key of Object.keys(result)) {
+                if (key === 'ttl' || key === '__proto__' || key === 'constructor' || key === 'prototype') continue
+                const desc = Object.getOwnPropertyDescriptor(result, key)
+                if (desc && desc.enumerable) {
+                  loadData[key] = result[key]
+                }
+              }
             }
 
             let layoutComponent: any = undefined
@@ -202,8 +286,8 @@ export async function createProdServer(options: ProdServerOptions): Promise<http
               mergeLoadResult(result)
             }
 
-            const finalTtl = pageTtl ?? config?.ttl?.pages
-            if (finalTtl && finalTtl > 0) {
+            const finalTtl = sanitizeTtl(pageTtl ?? config?.ttl?.pages)
+            if (finalTtl !== undefined && finalTtl > 0) {
               res.setHeader('Cache-Control', `public, max-age=${finalTtl}`)
             }
 
@@ -247,12 +331,10 @@ export async function createProdServer(options: ProdServerOptions): Promise<http
                   state: Object.keys(loadData).length > 0 ? loadData : undefined,
                   scripts: scripts.length > 0 ? scripts : undefined,
                 })
-                res.setHeader('Content-Type', 'text/html')
-                res.end(fullHtml)
+                sendHtml(res, fullHtml, req)
                 return
               } catch {
-                res.setHeader('Content-Type', 'text/html')
-                res.end(html)
+                sendHtml(res, html, req)
                 return
               }
             } else if (typeof mod.default === 'function') {
@@ -268,12 +350,10 @@ export async function createProdServer(options: ProdServerOptions): Promise<http
                 html,
                 state: Object.keys(loadData).length > 0 ? loadData : undefined,
               })
-              res.setHeader('Content-Type', 'text/html')
-              res.end(fullHtml)
+              sendHtml(res, fullHtml, req)
               return
             } catch {
-              res.setHeader('Content-Type', 'text/html')
-              res.end(html)
+              sendHtml(res, html, req)
               return
             }
           } catch (e) {
@@ -338,8 +418,13 @@ async function renderErrorPage(
           if (typeof layoutMod.load === 'function') {
             const result = await layoutMod.load({ req, ...ctx })
             if (result) {
-              const { ttl: _ttl, __proto__: _p, constructor: _c, prototype: _pt, ...rest } = result
-              Object.assign(loadData, rest)
+              for (const key of Object.keys(result)) {
+                if (key === 'ttl' || key === '__proto__' || key === 'constructor' || key === 'prototype') continue
+                const desc = Object.getOwnPropertyDescriptor(result, key)
+                if (desc && desc.enumerable) {
+                  loadData[key] = result[key]
+                }
+              }
             }
           }
           layoutComponent = layoutMod.default
@@ -377,12 +462,10 @@ async function renderErrorPage(
           head: headParts.length > 0 ? headParts.join('\n  ') : undefined,
           state: Object.keys(loadData).length > 0 ? loadData : undefined,
         })
-        res.setHeader('Content-Type', 'text/html')
-        res.end(fullHtml)
+        compressAndEnd(res, fullHtml, 'text/html', req)
         return
       } catch {
-        res.setHeader('Content-Type', 'text/html')
-        res.end(html)
+        compressAndEnd(res, html, 'text/html', req)
         return
       }
     } catch (e) {
@@ -391,8 +474,7 @@ async function renderErrorPage(
   }
 
   res.statusCode = statusCode
-  res.setHeader('Content-Type', 'text/html')
-  res.end(renderDefaultErrorPage(statusCode, statusMessage, errUrl))
+  compressAndEnd(res, renderDefaultErrorPage(statusCode, statusMessage, errUrl), 'text/html', req)
 }
 
 function buildSafeName(routePath: string, fallback: string): string {

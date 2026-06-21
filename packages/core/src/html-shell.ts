@@ -4,7 +4,12 @@ const shellCache = new Map<string, string>()
 const MAX_CACHE_SIZE = 10
 
 export function loadHtmlShell(shellPath: string): string {
-  if (shellCache.has(shellPath)) return shellCache.get(shellPath)!
+  if (shellCache.has(shellPath)) {
+    const cached = shellCache.get(shellPath)!
+    shellCache.delete(shellPath)
+    shellCache.set(shellPath, cached)
+    return cached
+  }
   if (shellCache.size >= MAX_CACHE_SIZE) {
     const firstKey = shellCache.keys().next().value
     if (firstKey) shellCache.delete(firstKey)
@@ -39,7 +44,7 @@ export function renderHtmlShell(
 
   if (options.scripts?.length) {
     const scriptTags = options.scripts
-      .map(src => `<script type="module" src="${src.replace(/"/g, '&quot;')}"></script>`)
+      .map(src => `<script type="module" src="${escapeAttr(src)}"></script>`)
       .join('\n  ')
     result = result.replace('<!--vitella-scripts-->', scriptTags)
   } else {
@@ -47,6 +52,10 @@ export function renderHtmlShell(
   }
 
   return result
+}
+
+function escapeAttr(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
 export function renderDefaultErrorPage(

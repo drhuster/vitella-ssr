@@ -27,7 +27,7 @@ export { createProdServer } from './prod-server.js'
 export type { ProdServerOptions } from './prod-server.js'
 export { Cookies, serializeCookie } from './cookies.js'
 export type { CookieOptions } from './cookies.js'
-export { parseRequestContext, flushCookies } from './request-context.js'
+export { parseRequestContext, flushCookies, readBody, BodyTooLargeError, DEFAULT_MAX_BODY_SIZE } from './request-context.js'
 
 const ASSET_MIME_TYPES: Record<string, string> = {
   '.css': 'text/css',
@@ -113,10 +113,22 @@ export function vitellaPlugin(userConfig?: Record<string, unknown>): Plugin {
           if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
             const ext = extname(filePath)
             res.setHeader('Content-Type', ASSET_MIME_TYPES[ext] || 'application/octet-stream')
+            res.setHeader('X-Content-Type-Options', 'nosniff')
+            res.setHeader('X-Frame-Options', 'DENY')
+            res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin')
             const imageTtl = state.config.ttl?.images
             if (imageTtl && imageTtl > 0) {
               res.setHeader('Cache-Control', `public, max-age=${imageTtl}`)
             }
+            const stat = fs.statSync(filePath)
+            const etag = `"${stat.mtimeMs}-${stat.size}"`
+            const reqHeaders = (req.headers as Record<string, string | string[] | undefined>) || {}
+            if (reqHeaders['if-none-match'] === etag) {
+              res.statusCode = 304
+              res.end()
+              return
+            }
+            res.setHeader('ETag', etag)
             const stream = fs.createReadStream(filePath)
             stream.on('error', () => {
               res.statusCode = 500

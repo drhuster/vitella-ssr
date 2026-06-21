@@ -22,3 +22,30 @@ export function flushCookies(res: ServerResponse, cookies: Cookies): void {
   }
   cookies.clear()
 }
+
+export const DEFAULT_MAX_BODY_SIZE = 10 * 1024 * 1024
+
+export class BodyTooLargeError extends Error {
+  constructor(public readonly maxSize: number) {
+    super(`Request body exceeds maximum size of ${maxSize} bytes`)
+    this.name = 'BodyTooLargeError'
+  }
+}
+
+export async function readBody(
+  req: IncomingMessage,
+  maxSize: number = DEFAULT_MAX_BODY_SIZE
+): Promise<string> {
+  const chunks: Buffer[] = []
+  let total = 0
+  for await (const chunk of req) {
+    const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as string)
+    total += buf.length
+    if (total > maxSize) {
+      chunks.length = 0
+      throw new BodyTooLargeError(maxSize)
+    }
+    chunks.push(buf)
+  }
+  return Buffer.concat(chunks).toString('utf-8')
+}

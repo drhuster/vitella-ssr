@@ -1,3 +1,5 @@
+import { readBody } from '@vitella-ssr/core'
+
 const users = [
   { id: 1, name: 'Alice' },
   { id: 2, name: 'Bob' },
@@ -8,9 +10,8 @@ export const get = async (req, res, ctx) => {
 }
 
 export const post = async (req, res, ctx) => {
-  let body = ''
-  for await (const chunk of req) body += chunk
-  const data = JSON.parse(body)
+  const raw = await readBody(req)
+  const data = JSON.parse(raw)
   const newUser = { id: users.length + 1, name: data.name }
   users.push(newUser)
   ctx.cookies.set('last_added', String(newUser.id), { httpOnly: true })
