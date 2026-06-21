@@ -39,14 +39,24 @@ describe('runMiddleware', () => {
     expect(handler).toHaveBeenCalledWith(req, res)
   })
 
-  it('skips final handler if middleware does not call next', async () => {
+  it('skips final handler if middleware ends the response without calling next', async () => {
     const { req, res } = createReqRes()
     const handler = vi.fn()
 
-    const mw = (_r: any, _s: any, _next: any) => { /* does not call next */ }
+    const mw = (_r: any, s: any, _next: any) => { s.end('handled') }
 
     await runMiddleware([mw], req, res, handler)
     expect(handler).not.toHaveBeenCalled()
+  })
+
+  it('calls final handler if middleware neither calls next nor ends the response', async () => {
+    const { req, res } = createReqRes()
+    const handler = vi.fn()
+
+    const mw = (_r: any, _s: any, _next: any) => { /* does nothing */ }
+
+    await runMiddleware([mw], req, res, handler)
+    expect(handler).toHaveBeenCalled()
   })
 
   it('throws on double next() call', async () => {

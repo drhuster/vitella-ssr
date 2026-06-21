@@ -3,6 +3,7 @@ import fs from 'fs'
 import path from 'path'
 import { promisify } from 'util'
 import { brotliCompress as brotliCompressCb, gzip as gzipCb, deflate as deflateCb, createBrotliCompress, createGzip, createDeflate } from 'zlib'
+import { Readable, Writable } from 'stream'
 import { matchRoute } from './route-matcher.js'
 import { runMiddleware } from './middleware-chain.js'
 import { loadHtmlShell, renderHtmlShell, renderDefaultErrorPage } from './html-shell.js'
@@ -61,6 +62,18 @@ function setSecurityHeaders(res: ServerResponse): void {
   res.setHeader('X-Content-Type-Options', 'nosniff')
   res.setHeader('X-Frame-Options', 'DENY')
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin')
+  res.setHeader('Strict-Transport-Security', 'max-age=31536000')
+  res.setHeader('Content-Security-Policy', [
+    "default-src 'self'",
+    "script-src 'self' 'unsafe-inline'",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data:",
+    "font-src 'self'",
+    "connect-src 'self'",
+    "frame-ancestors 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+  ].join('; '))
 }
 
 async function compressAndEnd(res: ServerResponse, data: string, contentType: string, req: IncomingMessage): Promise<void> {
@@ -89,31 +102,49 @@ async function compressAndEnd(res: ServerResponse, data: string, contentType: st
   }
 }
 
-function sendJson(res: ServerResponse, data: unknown, req: IncomingMessage): void {
-  compressAndEnd(res, JSON.stringify(data), 'application/json', req)
+async function sendJson(res: ServerResponse, data: unknown, req: IncomingMessage): Promise<void> {
+  await compressAndEnd(res, JSON.stringify(data), 'application/json', req)
 }
 
-function sendHtml(res: ServerResponse, html: string, req: IncomingMessage): void {
-  compressAndEnd(res, html, 'text/html', req)
+async function sendHtml(res: ServerResponse, html: string, req: IncomingMessage): Promise<void> {
+  await compressAndEnd(res, html, 'text/html', req)
 }
 
 function sendStaticStream(staticPath: string, mimeType: string, req: IncomingMessage, res: ServerResponse): void {
   res.setHeader('Content-Type', mimeType)
   const accept = req.headers['accept-encoding'] || ''
   const stream = fs.createReadStream(staticPath)
-  stream.on('error', () => {
-    res.statusCode = 500
-    compressAndEnd(res, 'Internal Server Error', 'text/plain', req)
+  const streams: (Readable | Writable)[] = [stream]
+  const cleanup = () => { for (const s of streams) s.destroy() }
+
+  res.on('close', cleanup)
+
+  stream.on('error', async () => {
+    cleanup()
+    if (!res.writableEnded) {
+      res.statusCode = 500
+      await compressAndEnd(res, 'Internal Server Error', 'text/plain', req)
+    }
   })
+
   if (accept.includes('br')) {
     res.setHeader('Content-Encoding', 'br')
-    stream.pipe(createBrotliCompress()).pipe(res)
+    const compress = createBrotliCompress()
+    compress.on('error', cleanup)
+    streams.push(compress)
+    stream.pipe(compress).pipe(res)
   } else if (accept.includes('gzip')) {
     res.setHeader('Content-Encoding', 'gzip')
-    stream.pipe(createGzip()).pipe(res)
+    const compress = createGzip()
+    compress.on('error', cleanup)
+    streams.push(compress)
+    stream.pipe(compress).pipe(res)
   } else if (accept.includes('deflate')) {
     res.setHeader('Content-Encoding', 'deflate')
-    stream.pipe(createDeflate()).pipe(res)
+    const compress = createDeflate()
+    compress.on('error', cleanup)
+    streams.push(compress)
+    stream.pipe(compress).pipe(res)
   } else {
     stream.pipe(res)
   }
@@ -170,7 +201,7 @@ export async function createProdServer(options: ProdServerOptions): Promise<http
     const contentLength = parseInt(req.headers['content-length'] || '0', 10)
     if (contentLength > MAX_BODY_SIZE) {
       res.statusCode = 413
-      compressAndEnd(res, 'Request Entity Too Large', 'text/plain', req)
+      await compressAndEnd(res, 'Request Entity Too Large', 'text/plain', req)
       return
     }
 
@@ -182,7 +213,7 @@ export async function createProdServer(options: ProdServerOptions): Promise<http
       const staticPath = path.resolve(rawPath)
       if (!staticPath.startsWith(path.resolve(clientDir) + path.sep)) {
         res.statusCode = 403
-        compressAndEnd(res, 'Forbidden', 'text/plain', req)
+        await compressAndEnd(res, 'Forbidden', 'text/plain', req)
         return
       }
       try {
@@ -227,12 +258,12 @@ export async function createProdServer(options: ProdServerOptions): Promise<http
               const result = await handler(req, res, ctx)
               res.statusCode = result.status || 200
               flushCookies(res, ctx.cookies)
-              sendJson(res, result.body, req)
+              await sendJson(res, result.body, req)
               return
             }
           } catch {
             res.statusCode = 500
-            compressAndEnd(res, 'Internal Server Error', 'text/plain', req)
+            await compressAndEnd(res, 'Internal Server Error', 'text/plain', req)
             return
           }
         }
@@ -331,10 +362,10 @@ export async function createProdServer(options: ProdServerOptions): Promise<http
                   state: Object.keys(loadData).length > 0 ? loadData : undefined,
                   scripts: scripts.length > 0 ? scripts : undefined,
                 })
-                sendHtml(res, fullHtml, req)
+                await sendHtml(res, fullHtml, req)
                 return
               } catch {
-                sendHtml(res, html, req)
+                await sendHtml(res, html, req)
                 return
               }
             } else if (typeof mod.default === 'function') {
@@ -350,10 +381,10 @@ export async function createProdServer(options: ProdServerOptions): Promise<http
                 html,
                 state: Object.keys(loadData).length > 0 ? loadData : undefined,
               })
-              sendHtml(res, fullHtml, req)
+              await sendHtml(res, fullHtml, req)
               return
             } catch {
-              sendHtml(res, html, req)
+              await sendHtml(res, html, req)
               return
             }
           } catch (e) {
@@ -462,10 +493,10 @@ async function renderErrorPage(
           head: headParts.length > 0 ? headParts.join('\n  ') : undefined,
           state: Object.keys(loadData).length > 0 ? loadData : undefined,
         })
-        compressAndEnd(res, fullHtml, 'text/html', req)
+        await compressAndEnd(res, fullHtml, 'text/html', req)
         return
       } catch {
-        compressAndEnd(res, html, 'text/html', req)
+        await compressAndEnd(res, html, 'text/html', req)
         return
       }
     } catch (e) {
@@ -474,7 +505,7 @@ async function renderErrorPage(
   }
 
   res.statusCode = statusCode
-  compressAndEnd(res, renderDefaultErrorPage(statusCode, statusMessage, errUrl), 'text/html', req)
+  await compressAndEnd(res, renderDefaultErrorPage(statusCode, statusMessage, errUrl), 'text/html', req)
 }
 
 function buildSafeName(routePath: string, fallback: string): string {

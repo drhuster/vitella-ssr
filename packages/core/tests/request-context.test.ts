@@ -1,7 +1,7 @@
-import { describe, it, expect } from 'vitest'
-import { IncomingMessage } from 'http'
+import { describe, it, expect, vi } from 'vitest'
+import { IncomingMessage, ServerResponse } from 'http'
 import { Socket } from 'net'
-import { parseRequestContext, flushCookies } from '../src/request-context.js'
+import { parseRequestContext, flushCookies, readBody, BodyTooLargeError } from '../src/request-context.js'
 import { Cookies } from '../src/cookies.js'
 
 function mockReq(url?: string, cookieHeader?: string): IncomingMessage {
@@ -93,5 +93,79 @@ describe('flushCookies', () => {
     } as any
     flushCookies(res, new Cookies())
     expect(called).toBe(false)
+  })
+})
+
+describe('readBody', () => {
+  it('reads body from request stream', async () => {
+    const req = new IncomingMessage(new Socket())
+    process.nextTick(() => {
+      req.push('hello world')
+      req.push(null)
+    })
+    const body = await readBody(req)
+    expect(body).toBe('hello world')
+  })
+
+  it('reads body chunks', async () => {
+    const req = new IncomingMessage(new Socket())
+    process.nextTick(() => {
+      req.push('chunk1')
+      req.push('chunk2')
+      req.push(null)
+    })
+    const body = await readBody(req)
+    expect(body).toBe('chunk1chunk2')
+  })
+
+  it('returns empty string for request with no body', async () => {
+    const req = new IncomingMessage(new Socket())
+    process.nextTick(() => req.push(null))
+    const body = await readBody(req)
+    expect(body).toBe('')
+  })
+
+  it('throws BodyTooLargeError when body exceeds maxSize', async () => {
+    const req = new IncomingMessage(new Socket())
+    process.nextTick(() => {
+      req.push(Buffer.alloc(100, 'x'))
+      req.push(null)
+    })
+    await expect(readBody(req, 50)).rejects.toThrow(BodyTooLargeError)
+  })
+
+  it('BodyTooLargeError maxSize is accessible', async () => {
+    const req = new IncomingMessage(new Socket())
+    process.nextTick(() => {
+      req.push(Buffer.alloc(100, 'x'))
+      req.push(null)
+    })
+    try {
+      await readBody(req, 50)
+    } catch (e) {
+      expect(e).toBeInstanceOf(BodyTooLargeError)
+      expect((e as BodyTooLargeError).maxSize).toBe(50)
+    }
+  })
+
+  it('handles non-Buffer chunks', async () => {
+    const req = new IncomingMessage(new Socket())
+    process.nextTick(() => {
+      req.push('string-chunk' as any)
+      req.push(null)
+    })
+    const body = await readBody(req, 100)
+    expect(body).toBe('string-chunk')
+  })
+})
+
+describe('readBody with destroy', () => {
+  it('rejects when request emits an error', async () => {
+    const req = new IncomingMessage(new Socket())
+    const error = new Error('stream error')
+    process.nextTick(() => {
+      req.destroy(error)
+    })
+    await expect(readBody(req)).rejects.toThrow('stream error')
   })
 })

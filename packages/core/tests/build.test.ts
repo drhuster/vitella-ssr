@@ -65,6 +65,17 @@ describe('generateBuildManifest', () => {
     expect(buildManifest.pages['__error__']).toBeUndefined()
   })
 
+  it('handles paths starting with underscore in safeName', () => {
+    const routeManifest: RouteManifest = {
+      pages: [
+        { path: '/_special', pattern: /^\/_special/, paramNames: [], filePath: 'src/pages/_special.vue', type: 'page' },
+      ],
+      apis: [],
+    }
+    const buildManifest = generateBuildManifest(routeManifest)
+    expect(buildManifest.pages['/_special'].serverEntry).toContain('_special')
+  })
+
   it('includes optional css field in page entries', () => {
     const routeManifest: RouteManifest = {
       pages: [

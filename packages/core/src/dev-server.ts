@@ -1,4 +1,4 @@
-import type { ViteDevServer } from 'vite'
+import type { ViteDevServer, ModuleNode } from 'vite'
 import { IncomingMessage, ServerResponse } from 'http'
 import { promisify } from 'util'
 import { brotliCompress as brotliCompressCb, gzip as gzipCb, deflate as deflateCb } from 'zlib'
@@ -9,7 +9,7 @@ import { loadHtmlShell, renderHtmlShell, renderDefaultErrorPage } from './html-s
 import type { ResolvedVitellaConfig } from './config.js'
 import type { AdapterRenderResult, ApiHandlerModule, Route } from './types.js'
 import { parseRequestContext, flushCookies, type RequestContext } from './request-context.js'
-import { resolve as resolvePath } from 'path'
+import { resolve as resolvePath, relative } from 'path'
 
 const brotliCompress = promisify(brotliCompressCb)
 const gzip = promisify(gzipCb)
@@ -34,6 +34,18 @@ function setSecurityHeaders(res: ServerResponse): void {
   res.setHeader('X-Content-Type-Options', 'nosniff')
   res.setHeader('X-Frame-Options', 'DENY')
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin')
+  res.setHeader('Strict-Transport-Security', 'max-age=31536000')
+  res.setHeader('Content-Security-Policy', [
+    "default-src 'self'",
+    "script-src 'self' 'unsafe-inline'",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data:",
+    "font-src 'self'",
+    "connect-src 'self'",
+    "frame-ancestors 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+  ].join('; '))
 }
 
 async function compressAndEnd(res: ServerResponse, data: string, contentType: string, req: IncomingMessage): Promise<void> {
@@ -62,12 +74,12 @@ async function compressAndEnd(res: ServerResponse, data: string, contentType: st
   }
 }
 
-function sendJson(res: ServerResponse, data: unknown, req: IncomingMessage): void {
-  compressAndEnd(res, JSON.stringify(data), 'application/json', req)
+async function sendJson(res: ServerResponse, data: unknown, req: IncomingMessage): Promise<void> {
+  await compressAndEnd(res, JSON.stringify(data), 'application/json', req)
 }
 
-function sendHtml(res: ServerResponse, html: string, req: IncomingMessage): void {
-  compressAndEnd(res, html, 'text/html', req)
+async function sendHtml(res: ServerResponse, html: string, req: IncomingMessage): Promise<void> {
+  await compressAndEnd(res, html, 'text/html', req)
 }
 
 const MAX_TTL = 31536000
@@ -78,6 +90,35 @@ function sanitizeTtl(ttl: unknown): number | undefined {
   }
   return undefined
 }
+
+function collectCssUrls(vite: ViteDevServer, filePath: string): string[] {
+  if (!vite.moduleGraph) return []
+
+  const root = vite.config.root || process.cwd()
+  const relativePath = '/' + relative(root, filePath)
+  const mod = vite.moduleGraph.urlToModuleMap.get(relativePath)
+  if (!mod) return []
+
+  const cssUrls = new Set<string>()
+  const visited = new Set<string>()
+
+  function walk(node: ModuleNode) {
+    if (visited.has(node.url)) return
+    visited.add(node.url)
+
+    if (node.url.includes('type=style') || node.url.endsWith('.css')) {
+      cssUrls.add(node.url)
+    }
+
+    for (const imported of node.importedModules) {
+      walk(imported)
+    }
+  }
+
+  walk(mod)
+  return [...cssUrls]
+}
+
 
 export async function handleRequest(
   req: IncomingMessage,
@@ -90,7 +131,7 @@ export async function handleRequest(
   const contentLength = parseInt(req.headers['content-length'] || '0', 10)
   if (contentLength > MAX_BODY_SIZE) {
     res.statusCode = 413
-    compressAndEnd(res, 'Request Entity Too Large', 'text/plain', req)
+    await compressAndEnd(res, 'Request Entity Too Large', 'text/plain', req)
     return
   }
 
@@ -133,14 +174,14 @@ async function handleApiRoute(
   if (!handler) {
     res.statusCode = 405
     flushCookies(res, ctx.cookies)
-    sendJson(res, { error: 'Method not allowed' }, req)
+    await sendJson(res, { error: 'Method not allowed' }, req)
     return
   }
 
   const result = await handler(req, res, ctx)
   res.statusCode = result.status || 200
   flushCookies(res, ctx.cookies)
-  sendJson(res, result.body, req)
+  await sendJson(res, result.body, req)
 }
 
 async function handleErrorPage(
@@ -188,7 +229,21 @@ async function handleErrorPage(
       const resultData = isStructuredResult(raw)
       const html = resultData ? raw.html : raw
       const title = resultData ? raw.title : undefined
-      const head = resultData ? raw.head : undefined
+      let head = resultData ? raw.head : undefined
+
+      const cssUrls = new Set<string>()
+      for (const url of collectCssUrls(vite, manifest.errorPage.filePath)) {
+        cssUrls.add(url)
+      }
+      if (manifest.errorPage.layout) {
+        for (const url of collectCssUrls(vite, manifest.errorPage.layout)) {
+          cssUrls.add(url)
+        }
+      }
+      if (cssUrls.size > 0) {
+        const cssLinks = [...cssUrls].map(u => `<link rel="stylesheet" href="${u}">`).join('\n  ')
+        head = head ? head + '\n  ' + cssLinks : cssLinks
+      }
 
       const scriptUrl = config.adapter.getClientEntry
         ? virtualClientUrl(manifest.errorPage.filePath)
@@ -203,7 +258,7 @@ async function handleErrorPage(
         state: Object.keys(loadData).length > 0 ? loadData : undefined,
         scripts: scriptUrl ? [scriptUrl] : undefined,
       })
-      sendHtml(res, fullHtml, req)
+      await sendHtml(res, fullHtml, req)
       return
     } catch (e) {
       console.error('Error rendering error page:', e)
@@ -211,7 +266,7 @@ async function handleErrorPage(
   }
 
   res.statusCode = statusCode
-  sendHtml(res, renderDefaultErrorPage(statusCode, statusMessage, errUrl), req)
+  await sendHtml(res, renderDefaultErrorPage(statusCode, statusMessage, errUrl), req)
 }
 
 async function handlePageRoute(
@@ -259,7 +314,7 @@ async function handlePageRoute(
     if (!config.adapter) {
       flushCookies(res, ctx.cookies)
       const template = loadHtmlShell(resolvePath(vite.config.root, config.appShell))
-      sendHtml(res, renderHtmlShell(template, { html: '<div>No adapter configured</div>' }), req)
+      await sendHtml(res, renderHtmlShell(template, { html: '<div>No adapter configured</div>' }), req)
       return
     }
 
@@ -276,7 +331,23 @@ async function handlePageRoute(
     const resultData = isStructuredResult(raw)
     const html = resultData ? raw.html : raw
     const title = resultData ? raw.title : undefined
-    const head = resultData ? raw.head : undefined
+    let head = resultData ? raw.head : undefined
+
+    // Collect CSS from Vite's module graph and inject as <link> tags.
+    // Prevents CLS by loading SFC scoped CSS upfront instead of via JS after hydration.
+    const cssUrls = new Set<string>()
+    for (const url of collectCssUrls(vite, route.filePath)) {
+      cssUrls.add(url)
+    }
+    if (route.layout) {
+      for (const url of collectCssUrls(vite, route.layout)) {
+        cssUrls.add(url)
+      }
+    }
+    if (cssUrls.size > 0) {
+      const cssLinks = [...cssUrls].map(u => `<link rel="stylesheet" href="${u}">`).join('\n  ')
+      head = head ? head + '\n  ' + cssLinks : cssLinks
+    }
 
     const scriptUrl = config.adapter.getClientEntry
       ? virtualClientUrl(route.filePath)
@@ -289,7 +360,7 @@ async function handlePageRoute(
 
     flushCookies(res, ctx.cookies)
     const template = loadHtmlShell(resolvePath(vite.config.root, config.appShell))
-    const fullHtml = renderHtmlShell(template, {
+    let fullHtml = renderHtmlShell(template, {
       html,
       title,
       head,
@@ -297,7 +368,14 @@ async function handlePageRoute(
       scripts: scriptUrl ? [scriptUrl] : undefined,
     })
 
-    sendHtml(res, fullHtml, req)
+    // Let Vite inject the client runtime and any remaining transforms
+    try {
+      fullHtml = await vite.transformIndexHtml(req.url || '/', fullHtml)
+    } catch {
+      // If transformIndexHtml fails, fall back to untransformed HTML
+    }
+
+    await sendHtml(res, fullHtml, req)
   } catch (e) {
     console.error('Error rendering page:', e)
     await handleErrorPage(500, 'Internal Server Error', req, res, vite, state)

@@ -92,4 +92,24 @@ describe('matchRoute', () => {
     expect(result).toBeTruthy()
     expect(result!.route.path).toBe('/about')
   })
+
+  it('returns null for empty non-root path', () => {
+    const result = matchRoute('', routes)
+    expect(result).toBeNull()
+  })
+
+  it('handles route with pattern that always matches but has no capture groups', () => {
+    const catchAll: Route[] = [
+      {
+        path: '/catch-all',
+        pattern: /.*/,
+        paramNames: [],
+        filePath: 'catchall.vue',
+        type: 'page',
+      },
+    ]
+    const result = matchRoute('/anything', catchAll)
+    expect(result).toBeTruthy()
+    expect(result!.params).toEqual({})
+  })
 })

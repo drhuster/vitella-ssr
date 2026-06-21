@@ -46,6 +46,10 @@ describe('serializeCookie', () => {
     expect(serializeCookie('foo', 'bar', { path: '/api' })).toBe('foo=bar; Path=/api')
   })
 
+  it('includes Domain when provided', () => {
+    expect(serializeCookie('foo', 'bar', { domain: 'example.com' })).toBe('foo=bar; Path=/; Domain=example.com')
+  })
+
   it('emits all flags in a single header', () => {
     const result = serializeCookie('foo', 'bar', {
       maxAge: 3600,
@@ -88,6 +92,26 @@ describe('Cookies', () => {
     const c = new Cookies('  foo  =  bar  ; baz=qux ')
     expect(c.get('foo')).toBe('bar')
     expect(c.get('baz')).toBe('qux')
+  })
+
+  it('parses cookies with no value (no =)', () => {
+    const c = new Cookies('flag')
+    expect(c.getAll()).toEqual({ flag: '' })
+  })
+
+  it('handles URL-encoded values in cookies', () => {
+    const c = new Cookies('token=hello%20world')
+    expect(c.get('token')).toBe('hello world')
+  })
+
+  it('falls back to raw value when URL decoding fails', () => {
+    const c = new Cookies('bad=%FF%FE')
+    expect(c.get('bad')).toBe('%FF%FE')
+  })
+
+  it('ignores empty cookie names', () => {
+    const c = new Cookies('=value; real=ok')
+    expect(c.get('real')).toBe('ok')
   })
 
   it('set buffers a Set-Cookie header', () => {

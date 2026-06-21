@@ -24,6 +24,9 @@ export async function runMiddleware(
         called = true
         await dispatch(i + 1)
       })
+      if (!called && !res.writableEnded) {
+        await dispatch(i + 1)
+      }
     } else if (finalHandler) {
       await finalHandler(req, res)
     }

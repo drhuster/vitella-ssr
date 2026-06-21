@@ -130,9 +130,14 @@ export function vitellaPlugin(userConfig?: Record<string, unknown>): Plugin {
             }
             res.setHeader('ETag', etag)
             const stream = fs.createReadStream(filePath)
+            const cleanup = () => stream.destroy()
+            res.on('close', cleanup)
             stream.on('error', () => {
-              res.statusCode = 500
-              res.end('Internal Server Error')
+              cleanup()
+              if (!res.writableEnded) {
+                res.statusCode = 500
+                res.end('Internal Server Error')
+              }
             })
             stream.pipe(res)
             return

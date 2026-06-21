@@ -193,7 +193,7 @@ describe('asset middleware', () => {
   it('calls next() for URLs not starting with /assets/', async () => {
     const mw = await setupAssetMiddleware()
     const req = { url: '/some-page' }
-    const res = { statusCode: 200, end: vi.fn(), setHeader: vi.fn() }
+    const res = { statusCode: 200, end: vi.fn(), setHeader: vi.fn(), on: vi.fn() }
     const next = vi.fn()
     await mw(req, res, next)
     expect(next).toHaveBeenCalledTimes(1)
@@ -202,7 +202,7 @@ describe('asset middleware', () => {
   it('blocks path traversal with 403', async () => {
     const mw = await setupAssetMiddleware()
     const req = { url: '/assets/../../secret.txt' }
-    const res = { statusCode: 200, end: vi.fn(), setHeader: vi.fn() }
+    const res = { statusCode: 200, end: vi.fn(), setHeader: vi.fn(), on: vi.fn() }
     const next = vi.fn()
     await mw(req, res, next)
     expect(res.statusCode).toBe(403)
@@ -214,11 +214,11 @@ describe('asset middleware', () => {
     const mw = await setupAssetMiddleware()
     vi.spyOn(fs, 'existsSync').mockReturnValue(true)
     vi.spyOn(fs, 'statSync').mockReturnValue({ isFile: () => true } as any)
-    const mockStream = { on: vi.fn().mockReturnThis(), pipe: vi.fn().mockReturnThis() }
+    const mockStream = { on: vi.fn().mockReturnThis(), pipe: vi.fn().mockReturnThis(), destroy: vi.fn() }
     vi.spyOn(fs, 'createReadStream').mockReturnValue(mockStream as any)
 
     const req = { url: '/assets/styles.css' }
-    const res = { statusCode: 200, end: vi.fn(), setHeader: vi.fn() }
+    const res = { statusCode: 200, end: vi.fn(), setHeader: vi.fn(), on: vi.fn() }
     const next = vi.fn()
     await mw(req, res, next)
 
@@ -227,15 +227,32 @@ describe('asset middleware', () => {
     expect(next).not.toHaveBeenCalled()
   })
 
+  it('returns 304 when ETag matches if-none-match header', async () => {
+    const mw = await setupAssetMiddleware()
+    vi.spyOn(fs, 'existsSync').mockReturnValue(true)
+    vi.spyOn(fs, 'statSync').mockReturnValue({ mtimeMs: 1000, size: 500, isFile: () => true } as any)
+    const mockStream = { on: vi.fn().mockReturnThis(), pipe: vi.fn().mockReturnThis(), destroy: vi.fn() }
+    vi.spyOn(fs, 'createReadStream').mockReturnValue(mockStream as any)
+
+    const req = { url: '/assets/styles.css', headers: { 'if-none-match': '"1000-500"' } }
+    const res = { statusCode: 200, end: vi.fn(), setHeader: vi.fn(), on: vi.fn() }
+    const next = vi.fn()
+    await mw(req, res, next)
+
+    expect(res.statusCode).toBe(304)
+    expect(res.end).toHaveBeenCalled()
+    expect(fs.createReadStream).not.toHaveBeenCalled()
+  })
+
   it('sets Cache-Control header for images when ttl.images is configured', async () => {
     const mw = await setupAssetMiddleware({ ttl: { images: 3600 } })
     vi.spyOn(fs, 'existsSync').mockReturnValue(true)
     vi.spyOn(fs, 'statSync').mockReturnValue({ isFile: () => true } as any)
-    const mockStream = { on: vi.fn().mockReturnThis(), pipe: vi.fn().mockReturnThis() }
+    const mockStream = { on: vi.fn().mockReturnThis(), pipe: vi.fn().mockReturnThis(), destroy: vi.fn() }
     vi.spyOn(fs, 'createReadStream').mockReturnValue(mockStream as any)
 
     const req = { url: '/assets/logo.png' }
-    const res = { statusCode: 200, end: vi.fn(), setHeader: vi.fn() }
+    const res = { statusCode: 200, end: vi.fn(), setHeader: vi.fn(), on: vi.fn() }
     await mw(req, res, vi.fn())
 
     expect(res.setHeader).toHaveBeenCalledWith('Content-Type', 'image/png')
@@ -254,11 +271,12 @@ describe('asset middleware', () => {
         return mockStream
       }),
       pipe: vi.fn().mockReturnThis(),
+      destroy: vi.fn(),
     }
     vi.spyOn(fs, 'createReadStream').mockReturnValue(mockStream as any)
 
     const req = { url: '/assets/styles.css' }
-    const res = { statusCode: 200, end: vi.fn(), setHeader: vi.fn() }
+    const res = { statusCode: 200, end: vi.fn(), setHeader: vi.fn(), on: vi.fn() }
     await mw(req, res, vi.fn())
 
     errorHandler(new Error('stream failed'))
@@ -271,7 +289,7 @@ describe('asset middleware', () => {
     vi.spyOn(fs, 'existsSync').mockReturnValue(false)
 
     const req = { url: '/assets/missing.js' }
-    const res = { statusCode: 200, end: vi.fn(), setHeader: vi.fn() }
+    const res = { statusCode: 200, end: vi.fn(), setHeader: vi.fn(), on: vi.fn() }
     const next = vi.fn()
     await mw(req, res, next)
     expect(next).toHaveBeenCalledTimes(1)
@@ -281,11 +299,11 @@ describe('asset middleware', () => {
     const mw = await setupAssetMiddleware()
     vi.spyOn(fs, 'existsSync').mockReturnValue(true)
     vi.spyOn(fs, 'statSync').mockReturnValue({ isFile: () => true } as any)
-    const mockStream = { on: vi.fn().mockReturnThis(), pipe: vi.fn().mockReturnThis() }
+    const mockStream = { on: vi.fn().mockReturnThis(), pipe: vi.fn().mockReturnThis(), destroy: vi.fn() }
     vi.spyOn(fs, 'createReadStream').mockReturnValue(mockStream as any)
 
     const req = { url: '/assets/file.xyz' }
-    const res = { statusCode: 200, end: vi.fn(), setHeader: vi.fn() }
+    const res = { statusCode: 200, end: vi.fn(), setHeader: vi.fn(), on: vi.fn() }
     await mw(req, res, vi.fn())
 
     expect(res.setHeader).toHaveBeenCalledWith('Content-Type', 'application/octet-stream')
@@ -354,7 +372,7 @@ describe('SSR middleware', () => {
       pages: [{ path: '/about', pattern: /^\/about/, filePath: 'src/pages/about.vue', paramNames: [], type: 'page' as const }],
     })
     const req = { url: '/unknown' }
-    const res = { statusCode: 200, end: vi.fn(), setHeader: vi.fn() }
+    const res = { statusCode: 200, end: vi.fn(), setHeader: vi.fn(), on: vi.fn() }
     const next = vi.fn()
     await mw(req, res, next)
     expect(handleRequest).toHaveBeenCalled()
@@ -366,7 +384,7 @@ describe('SSR middleware', () => {
       pages: [{ path: '/about', pattern: /^\/about/, filePath: 'src/pages/about.vue', paramNames: [], type: 'page' as const }],
     })
     const req = { url: '/about' }
-    const res = { statusCode: 200, end: vi.fn(), setHeader: vi.fn() }
+    const res = { statusCode: 200, end: vi.fn(), setHeader: vi.fn(), on: vi.fn() }
     const next = vi.fn()
     await mw(req, res, next)
     expect(handleRequest).toHaveBeenCalled()
@@ -379,7 +397,7 @@ describe('SSR middleware', () => {
       apis: [{ path: '/api/hello', pattern: /^\/api\/hello/, filePath: 'src/server/hello.ts', paramNames: [], type: 'api' as const }],
     })
     const req = { url: '/api/hello' }
-    const res = { statusCode: 200, end: vi.fn(), setHeader: vi.fn() }
+    const res = { statusCode: 200, end: vi.fn(), setHeader: vi.fn(), on: vi.fn() }
     const next = vi.fn()
     await mw(req, res, next)
     expect(handleRequest).toHaveBeenCalled()
@@ -393,7 +411,7 @@ describe('SSR middleware', () => {
     vi.mocked(handleRequest).mockRejectedValue(new Error('ssr failure'))
 
     const req = { url: '/' }
-    const res = { statusCode: 200, end: vi.fn(), setHeader: vi.fn() }
+    const res = { statusCode: 200, end: vi.fn(), setHeader: vi.fn(), on: vi.fn() }
     const next = vi.fn()
     const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
 

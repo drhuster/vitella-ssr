@@ -12,6 +12,17 @@ describe('loadHtmlShell', () => {
     expect(loadHtmlShell(shellPath)).toBe('<html><!--vitella-html--></html>')
     rmSync(tmpDir, { recursive: true, force: true })
   })
+
+  it('returns cached content on repeated calls', () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), 'vitella-cache-'))
+    const shellPath = join(tmpDir, 'app.html')
+    writeFileSync(shellPath, '<html><!--vitella-html--></html>')
+    const first = loadHtmlShell(shellPath)
+    writeFileSync(shellPath, '<html>modified</html>')
+    const second = loadHtmlShell(shellPath)
+    expect(second).toBe(first)
+    rmSync(tmpDir, { recursive: true, force: true })
+  })
 })
 
 describe('renderHtmlShell', () => {
