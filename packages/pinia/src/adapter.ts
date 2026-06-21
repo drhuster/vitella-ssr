@@ -12,7 +12,7 @@ export const piniaVueAdapter: Adapter = {
 
   render: async ({ component, loadData, layout }) => {
     const { createSSRApp, h } = await import('vue')
-    const { renderToString } = await import('@vue/server-renderer')
+    const { renderToString } = await import('vue/server-renderer')
 
     const ssrContext: {
       head?: { title?: string; meta?: Array<any>; link?: Array<any> }

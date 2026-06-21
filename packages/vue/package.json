@@ -1,6 +1,6 @@
 {
   "name": "@vitella-ssr/vue",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "A plugin to support Vue in Vitella",
   "type": "module",
   "main": "./dist/index.js",
@@ -21,8 +21,7 @@
     "vite": "8.0.16"
   },
   "dependencies": {
-    "vue": "3.5.38",
-    "@vue/server-renderer": "3.5.38"
+    "vue": "3.5.38"
   },
   "peerDependencies": {
     "@vitella-ssr/core": "^0.1.0"
@@ -31,7 +30,6 @@
     "@vitella-ssr/core": "*",
     "@vitejs/plugin-vue": "^5.0.0",
     "vue": "3.5.38",
-    "@vue/server-renderer": "3.5.38",
     "vitest": "4.1.9",
     "@types/node": "25.9.3"
   }

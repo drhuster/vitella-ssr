@@ -25,7 +25,7 @@ vi.mock('vue', () => ({
   h: mockH,
 }))
 
-vi.mock('@vue/server-renderer', () => ({
+vi.mock('vue/server-renderer', () => ({
   renderToString: mockRenderToString,
 }))
 

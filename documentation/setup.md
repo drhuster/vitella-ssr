@@ -53,7 +53,7 @@ npm install @vitella-ssr/core
 For Vue:
 
 ```bash
-npm install @vitella-ssr/vue vue @vue/server-renderer
+npm install @vitella-ssr/vue vue
 npm install -D @vitejs/plugin-vue
 ```
 
@@ -320,7 +320,7 @@ import { vueAdapter } from '@vitella-ssr/vue'
 vitellaPlugin({ adapter: vueAdapter })
 ```
 
-Uses `vue` and `@vue/server-renderer` — no Vue Router, no auto-imports.
+Uses `vue` and `vue/server-renderer` — no Vue Router, no auto-imports.
 
 ### Pinia Adapter (`@vitella-ssr/pinia`)
 

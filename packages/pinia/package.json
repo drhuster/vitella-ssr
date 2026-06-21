@@ -1,6 +1,6 @@
 {
   "name": "@vitella-ssr/pinia",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "A plugin to support Pinia in Vitella",
   "type": "module",
   "main": "./dist/index.js",

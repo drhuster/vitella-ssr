@@ -1,5 +1,5 @@
 import { createSSRApp, h } from 'vue'
-import { renderToString } from '@vue/server-renderer'
+import { renderToString } from 'vue/server-renderer'
 import type { AdapterRenderResult } from '@vitella-ssr/core'
 
 function escapeHtml(s: string): string {
