@@ -1,4 +1,12 @@
 #!/usr/bin/env node
+/**
+ * CLI entry point for Vitella SSR — provides `dev`, `build`, and `start` commands.
+ *
+ * Dev mode:     Creates a Vite dev server with the Vitella plugin for HMR and SSR.
+ * Build mode:   Discovers routes, generates client/server bundles, and writes build artifacts to dist/.
+ * Start mode:   Loads the build artifacts and creates a production Node.js HTTP server.
+ */
+
 import { createServer as createViteDevServer } from 'vite'
 import { resolve } from 'path'
 import fs from 'fs'
@@ -11,6 +19,7 @@ import { safeName } from './response-utils.js'
 
 const command = process.argv[2]
 
+/** Scan package.json for any @vitella-ssr/* adapter packages (excluding core). */
 async function detectAdapterPackages(root: string): Promise<string[]> {
   try {
     const pkg = JSON.parse(fs.readFileSync(resolve(root, 'package.json'), 'utf-8'))
@@ -20,6 +29,7 @@ async function detectAdapterPackages(root: string): Promise<string[]> {
   return []
 }
 
+/** Import a package and find its exported adapter (looks for keys ending with 'adapter' or 'Adapter'). */
 async function adapterForPackage(name: string): Promise<unknown> {
   if (!name) return undefined
   const mod = await import(name)
@@ -31,6 +41,7 @@ async function adapterForPackage(name: string): Promise<unknown> {
   return undefined
 }
 
+/** Detect and load the appropriate framework adapter for the project. */
 async function getAdapter(): Promise<any> {
   const adapterPkgs = await detectAdapterPackages(process.cwd())
   for (const pkg of adapterPkgs) {
@@ -40,6 +51,10 @@ async function getAdapter(): Promise<any> {
   return undefined
 }
 
+/**
+ * Parse TTL (cache duration) config from the vite.config source file.
+ * This avoids needing to resolve the full Vite config during build.
+ */
 async function extractTtlFromViteConfig(root: string): Promise<{ images?: number; pages?: number } | undefined> {
   const candidates = [
     resolve(root, 'vite.config.js'),
@@ -70,6 +85,7 @@ async function main() {
 
   switch (command) {
     case 'dev': {
+      // Start a Vite dev server with the Vitella plugin — handles HMR and SSR in development.
       const server = await createViteDevServer({
         root,
         plugins: [vitellaPlugin()],
@@ -81,11 +97,13 @@ async function main() {
     }
 
     case 'build': {
+      // Build pipeline: discover routes, generate client + server bundles, write artifacts.
       const { build } = await import('vite')
       const pagesDir = resolve(root, 'src/pages')
       const serverDir = resolve(root, 'src/server')
       const routeManifest = buildRouteManifest(pagesDir, serverDir)
 
+      // Generate adapter-based client hydration entries into a temp directory.
       const entriesDir = resolve(root, '.vitella', 'entries', 'pages')
       fs.mkdirSync(entriesDir, { recursive: true })
 
@@ -108,6 +126,7 @@ async function main() {
         : {}
       await build({ root, build: { outDir: 'dist/client', ...clientExtra } })
 
+      // Build SSR bundles: each page, layout, and API route becomes a separate server entry.
       console.log('Building server...')
       const ssrInput: Record<string, string> = {}
       for (const page of routeManifest.pages) {
@@ -132,6 +151,7 @@ async function main() {
         },
       })
 
+      // Write build metadata (config, manifest, routes) for use by the production server.
       const adapterPkgs = await detectAdapterPackages(root)
       const buildConfig: Record<string, unknown> = { appShell: 'src/app.html' }
       if (adapterPkgs.length > 0) {
@@ -144,6 +164,7 @@ async function main() {
 
       fs.writeFileSync(resolve(root, 'dist/config.json'), JSON.stringify(buildConfig, null, 2))
 
+      // Copy static assets to dist/client/assets.
       const assetsDir = resolve(root, 'src/assets')
       if (fs.existsSync(assetsDir)) {
         const distAssetsDir = resolve(root, 'dist/client/assets')
@@ -152,6 +173,7 @@ async function main() {
         console.log('Assets copied to dist/client/assets/')
       }
 
+      // Annotate the build manifest with CSS chunks from Vite's client manifest.
       const buildManifest = generateBuildManifest(routeManifest)
 
       const clientManifestPath = resolve(root, 'dist', 'client', '.vite', 'manifest.json')
@@ -178,6 +200,7 @@ async function main() {
     }
 
     case 'start': {
+      // Production server: load build artifacts and create an HTTP server.
       const distDir = resolve(root, 'dist')
       const appShell = resolve(root, 'src', 'app.html')
       let config: { adapter?: unknown; appShell?: string; ttl?: { images?: number; pages?: number }; adapterPackages?: string[] } | undefined

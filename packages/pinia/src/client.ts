@@ -1,5 +1,13 @@
+/**
+ * Client-side Pinia hydration for Vitella SSR.
+ *
+ * Creates a Pinia instance and hydrates it with the state serialized
+ * during SSR and stored in window.__INITIAL_STATE__.pinia.
+ */
+
 import { createPinia, type StateTree } from 'pinia'
 
+/** Create and hydrate a Pinia instance from server-serialized state, with prototype pollution protection. */
 export function hydratePinia(): ReturnType<typeof createPinia> {
   const pinia = createPinia()
 

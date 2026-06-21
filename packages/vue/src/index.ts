@@ -1,3 +1,11 @@
+/**
+ * Vue 3 adapter for Vitella SSR.
+ *
+ * Implements the Adapter interface for Vue 3 single-file components (.vue).
+ * Handles SSR rendering (with optional layout wrapping) and generates
+ * client-side hydration JavaScript that creates and mounts a Vue SSR app.
+ */
+
 import type { Adapter } from '@vitella-ssr/core'
 import { renderVueComponent } from './renderer.js'
 
@@ -9,6 +17,7 @@ export const vueAdapter: Adapter = {
   render: async ({ component, loadData, layout }) => {
     return renderVueComponent(component, loadData, layout)
   },
+  /** Generate JavaScript code for client-side hydration — imports the page (and optional layout), creates an SSR app, mounts it. */
   getClientEntry(page: string, pagePath: string, layout?: string): string {
     if (!/^[a-zA-Z0-9_./@[\]-]+$/.test(pagePath)) {
       throw new Error(`Invalid pagePath: ${pagePath}`)

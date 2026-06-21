@@ -1,3 +1,16 @@
+/**
+ * Vitella SSR Vite plugin — the framework's main entry point.
+ *
+ * This plugin integrates with Vite's dev server and build pipeline to:
+ *   - Scan the filesystem for page and API routes
+ *   - Serve static assets from the configured assets directory
+ *   - Inject client hydration entries for framework adapters
+ *   - Route SSR page requests and API requests through the dev server
+ *
+ * It enforces the 'pre' plugin order so it runs before Vite's built-in
+ * middlewares, preventing Vite from intercepting asset serving.
+ */
+
 import type { Plugin, ViteDevServer } from 'vite'
 import { extname, resolve, sep } from 'path'
 import fs from 'fs'
@@ -29,6 +42,7 @@ export { Cookies, serializeCookie } from './cookies.js'
 export type { CookieOptions } from './cookies.js'
 export { parseRequestContext, flushCookies, readBody, BodyTooLargeError, DEFAULT_MAX_BODY_SIZE } from './request-context.js'
 
+/** MIME type mapping for static assets served from the /assets/ directory. */
 const ASSET_MIME_TYPES: Record<string, string> = {
   '.css': 'text/css',
   '.js': 'application/javascript',
@@ -45,19 +59,25 @@ const ASSET_MIME_TYPES: Record<string, string> = {
   '.txt': 'text/plain',
 }
 
+/** Create the Vitella SSR Vite plugin. The userConfig is merged with defaults inside configResolved. */
 export function vitellaPlugin(userConfig?: Record<string, unknown>): Plugin {
+  /** Mutable state built during config resolution — holds the route manifest and resolved config. */
   let state: DevServerState
 
+  /** Prefix for virtual module IDs that provide client-side hydration code for each page. */
   const VIRTUAL_PREFIX = '\0vitella:client-entry:'
 
   return {
     name: 'vitella-ssr',
+    /** Run before other plugins so we intercept asset requests before Vite's built-in middleware. */
     enforce: 'pre',
 
+    /** Tell Vite we're handling HTML ourselves (no SPA index.html). */
     config() {
       return { appType: 'custom' as const }
     },
 
+    /** Once Vite resolves its config, build the route manifest and store it in the plugin state. */
     async configResolved(config) {
       const root = config.root || process.cwd()
       const resolved = await resolveConfig(userConfig as any)
@@ -68,6 +88,7 @@ export function vitellaPlugin(userConfig?: Record<string, unknown>): Plugin {
       state = { manifest, config: resolved }
     },
 
+    /** Resolve virtual client-entry modules so Vite knows they exist. */
     resolveId(id: string) {
       if (id.startsWith(VIRTUAL_PREFIX)) {
         return id
@@ -78,6 +99,7 @@ export function vitellaPlugin(userConfig?: Record<string, unknown>): Plugin {
       return null
     },
 
+    /** Generate the client-side hydration code for a page by delegating to the adapter's getClientEntry. */
     load(id: string) {
       if (id.startsWith(VIRTUAL_PREFIX)) {
         const pagePath = id.slice(VIRTUAL_PREFIX.length)
@@ -93,6 +115,7 @@ export function vitellaPlugin(userConfig?: Record<string, unknown>): Plugin {
       return null
     },
 
+    /** Register Vite connect middlewares for static asset serving and SSR request handling. */
     configureServer(server: ViteDevServer) {
       // Serve files from the assets directory at /assets/ URL prefix.
       // Runs before Vite's internal middlewares so Vite doesn't intercept.
@@ -104,6 +127,7 @@ export function vitellaPlugin(userConfig?: Record<string, unknown>): Plugin {
           const relativePath = url.slice('/assets/'.length).split('?')[0]
           const filePath = resolve(assetsDir, relativePath)
 
+          // Prevent directory traversal outside the assets directory.
           if (!filePath.startsWith(assetsDir + sep)) {
             res.statusCode = 403
             res.end('Forbidden')
@@ -120,6 +144,7 @@ export function vitellaPlugin(userConfig?: Record<string, unknown>): Plugin {
             if (imageTtl && imageTtl > 0) {
               res.setHeader('Cache-Control', `public, max-age=${imageTtl}`)
             }
+            // ETag-based caching — respond 304 if the browser has the current version.
             const stat = fs.statSync(filePath)
             const etag = `"${stat.mtimeMs}-${stat.size}"`
             const reqHeaders = (req.headers as Record<string, string | string[] | undefined>) || {}
@@ -146,6 +171,8 @@ export function vitellaPlugin(userConfig?: Record<string, unknown>): Plugin {
         next()
       })
 
+      // Return a post-middleware: this runs after Vite's built-in middlewares,
+      // so we only handle requests that Vite didn't already resolve.
       return () => {
         server.middlewares.use(async (req, res, next) => {
           const url = req.url || '/'
@@ -166,6 +193,7 @@ export function vitellaPlugin(userConfig?: Record<string, unknown>): Plugin {
       }
     },
 
+    /** When Vite starts a production build, rebuild the route manifest (config is already resolved). */
     buildStart() {
       if (state) {
         const root = process.cwd()

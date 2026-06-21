@@ -1,3 +1,12 @@
+/**
+ * Pinia + Vue combined adapter for Vitella SSR.
+ *
+ * Extends the Vue adapter to add Pinia state management support:
+ *   - Creates a per-request Pinia instance during SSR
+ *   - Serializes all Pinia store state into loadData.pinia
+ *   - Generates client entries that hydrate Pinia from window.__INITIAL_STATE__
+ */
+
 import type { Adapter } from '@vitella-ssr/core'
 import { vueAdapter } from '@vitella-ssr/vue'
 import { createPiniaSSR } from './server.js'
@@ -10,6 +19,7 @@ export const piniaVueAdapter: Adapter = {
   ...vueAdapter,
   name: 'pinia-vue',
 
+  /** Render a Vue component with Pinia support — creates a Pinia instance, serializes state into loadData. */
   render: async ({ component, loadData, layout }) => {
     const { createSSRApp, h } = await import('vue')
     const { renderToString } = await import('vue/server-renderer')
@@ -63,6 +73,7 @@ export const piniaVueAdapter: Adapter = {
     }
   },
 
+  /** Generate client hydration code that imports and hydrates Pinia from the serialized server state. */
   getClientEntry(page: string, pagePath: string, layout?: string): string {
     if (!/^[a-zA-Z0-9_./@[\]-]+$/.test(pagePath)) {
       throw new Error(`Invalid pagePath: ${pagePath}`)

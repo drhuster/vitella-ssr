@@ -1,8 +1,19 @@
+/**
+ * HTML shell template engine for Vitella SSR.
+ *
+ * Loads and caches an HTML shell file (src/app.html) that contains
+ * placeholder comments (<!--vitella-html-->, <!--vitella-title-->, etc.)
+ * which are replaced with the rendered page content, metadata, state,
+ * and script tags.
+ */
+
 import { readFileSync } from 'fs'
 
+/** LRU cache for HTML shell files (limited to 10 entries). */
 const shellCache = new Map<string, string>()
 const MAX_CACHE_SIZE = 10
 
+/** Load an HTML shell file by path, using an LRU cache. Re-inserts on access to maintain recency. */
 export function loadHtmlShell(shellPath: string): string {
   if (shellCache.has(shellPath)) {
     const cached = shellCache.get(shellPath)!
@@ -19,6 +30,7 @@ export function loadHtmlShell(shellPath: string): string {
   return content
 }
 
+/** Replace the placeholder tokens in the HTML shell with the rendered content, metadata, and scripts. */
 export function renderHtmlShell(
   template: string,
   options: {
@@ -54,10 +66,12 @@ export function renderHtmlShell(
   return result
 }
 
+/** Escape a string for safe use in an HTML attribute value. */
 function escapeAttr(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
+/** Generate a simple styled HTML error page with status code, message, and URL. */
 export function renderDefaultErrorPage(
   statusCode: number,
   statusMessage: string,
@@ -89,6 +103,7 @@ export function renderDefaultErrorPage(
 </html>`
 }
 
+/** Escape a string for safe insertion into HTML content. */
 function escapeHtml(str: string): string {
   return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 }

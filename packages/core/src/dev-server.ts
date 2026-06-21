@@ -1,3 +1,13 @@
+/**
+ * Dev server request handling for Vitella SSR.
+ *
+ * Routes incoming HTTP requests to the appropriate handler:
+ *   - API routes (GET/POST/PUT/DELETE/PATCH on /api/* paths)
+ *   - Page routes (SSR-rendered pages with data loading, layout wrapping, CSS collection)
+ *   - Error pages (custom _error pages or fallback HTML)
+ *   - Middleware chain execution before route dispatch
+ */
+
 import type { ViteDevServer, ModuleNode } from 'vite'
 import { IncomingMessage, ServerResponse } from 'http'
 import { buildRouteManifest } from './route-manifest.js'
@@ -26,10 +36,15 @@ export interface DevServerState {
   config: ResolvedVitellaConfig
 }
 
+/** Build the Vite virtual module URL for a page's client hydration entry. */
 function virtualClientUrl(pagePath: string): string {
   return `/@id/__x00__vitella:client-entry:${pagePath}`
 }
 
+/**
+ * Walk the Vite module graph starting from the given file and collect all
+ * CSS module URLs (including those from <style> blocks and .css imports).
+ */
 function collectCssUrls(vite: ViteDevServer, filePath: string): string[] {
   if (!vite.moduleGraph) return []
 
@@ -58,6 +73,7 @@ function collectCssUrls(vite: ViteDevServer, filePath: string): string[] {
   return [...cssUrls]
 }
 
+/** Main entry point for handling an SSR request in dev mode. Runs middleware, then dispatches to API/page/error handlers. */
 export async function handleRequest(
   req: IncomingMessage,
   res: ServerResponse,
@@ -66,6 +82,7 @@ export async function handleRequest(
 ): Promise<void> {
   setSecurityHeaders(res, state.config.securityHeaders)
 
+  // Reject oversized request bodies early.
   const contentLength = parseInt(req.headers['content-length'] || '0', 10)
   if (contentLength > MAX_BODY_SIZE) {
     res.statusCode = 413
@@ -76,6 +93,7 @@ export async function handleRequest(
   const url = req.url || '/'
   const { manifest, config } = state
 
+  // Execute middleware chain before route matching.
   await runMiddleware(config.middleware, req, res, async (req, res) => {
     const apiMatch = matchRoute(url, manifest.apis)
     if (apiMatch) {
@@ -93,6 +111,7 @@ export async function handleRequest(
   })
 }
 
+/** Load an API route module, find the handler for the HTTP method, execute it, and send the JSON response. */
 async function handleApiRoute(
   route: { filePath: string },
   params: Record<string, string>,
@@ -118,6 +137,7 @@ async function handleApiRoute(
   await sendJson(res, result.body, req)
 }
 
+/** Load a page module, execute its data load functions, render via the adapter, collect CSS, and send the HTML shell. */
 async function handlePageRoute(
   route: Route,
   params: Record<string, string>,
@@ -132,6 +152,7 @@ async function handlePageRoute(
   let pageTtl: number | undefined = undefined
   const ctx: RequestContext = parseRequestContext(req, params)
 
+  // If the page has a layout, load it and execute its load() function first.
   let layoutComponent: any = undefined
   if (route.layout) {
     const layoutMod = await vite.ssrLoadModule(route.layout)
@@ -143,6 +164,7 @@ async function handlePageRoute(
     layoutComponent = layoutMod.default
   }
 
+  // Execute the page's own data load function.
   if (typeof mod.load === 'function') {
     const result = await mod.load({ req, ...ctx })
     const ttl = mergeLoadResult(result, loadData)
@@ -157,6 +179,7 @@ async function handlePageRoute(
       return
     }
 
+    // Render the page component (with optional layout wrapper) through the framework adapter.
     const component = mod.default
     const raw = await config.adapter.render({
       page: route.filePath,
@@ -172,6 +195,7 @@ async function handlePageRoute(
     const title = resultData ? raw.title : undefined
     let head = resultData ? raw.head : undefined
 
+    // Collect all CSS URLs from the Vite module graph for both the page and its layout.
     const cssUrls = new Set<string>()
     for (const url of collectCssUrls(vite, route.filePath)) {
       cssUrls.add(url)
@@ -186,10 +210,12 @@ async function handlePageRoute(
       head = head ? head + '\n  ' + cssLinks : cssLinks
     }
 
+    // Generate the virtual client hydration script URL if the adapter supports it.
     const scriptUrl = config.adapter.getClientEntry
       ? virtualClientUrl(route.filePath)
       : undefined
 
+    // Apply page-level or global TTL for Cache-Control header.
     const finalTtl = sanitizeTtl(pageTtl ?? config.ttl?.pages)
     if (finalTtl !== undefined && finalTtl > 0) {
       res.setHeader('Cache-Control', `public, max-age=${finalTtl}`)
@@ -213,6 +239,7 @@ async function handlePageRoute(
   }
 }
 
+/** Render an error page — either via the adapter's custom _error component or the built-in fallback. */
 async function handleErrorPage(
   statusCode: number,
   statusMessage: string,

@@ -1,3 +1,13 @@
+/**
+ * Production HTTP server for Vitella SSR.
+ *
+ * Serves built assets from dist/ with ETag-based caching and on-the-fly
+ * compression (brotli/gzip/deflate). Routes API and page requests using
+ * the pre-built route manifest, loading SSR entry modules dynamically.
+ * Supports the same middleware chain, layout wrapping, data loading,
+ * and TTL-based caching as the dev server.
+ */
+
 import http, { IncomingMessage, ServerResponse } from 'http'
 import fs from 'fs'
 import path from 'path'
@@ -23,6 +33,7 @@ import {
   safeName,
 } from './response-utils.js'
 
+/** Serializable route data from the build manifest — rehydrated into full Route objects at runtime. */
 interface RouteData {
   path: string
   paramNames: string[]
@@ -30,6 +41,7 @@ interface RouteData {
   layout?: string
 }
 
+/** Reconstruct Route objects from the serialized JSON, regenerating the regex patterns at startup. */
 function deserializeRoutes(data: { pages: RouteData[]; apis: RouteData[]; errorPage?: ErrorPageInfo }): { pages: Route[]; apis: Route[] } {
   const toRoute = (r: RouteData): Route => ({
     path: r.path,
@@ -59,6 +71,7 @@ export interface ProdServerOptions {
   config?: ResolvedVitellaConfig
 }
 
+/** Stream a static file with on-the-fly compression based on the request's Accept-Encoding header. */
 function sendStaticStream(staticPath: string, mimeType: string, req: IncomingMessage, res: ServerResponse): void {
   res.setHeader('Content-Type', mimeType)
   const accept = req.headers['accept-encoding'] || ''
@@ -99,6 +112,7 @@ function sendStaticStream(staticPath: string, mimeType: string, req: IncomingMes
   }
 }
 
+/** Create the production HTTP server, loading the build manifest and routes from dist/. */
 export async function createProdServer(options: ProdServerOptions): Promise<http.Server> {
   const { distDir, appShell } = options
   const manifestPath = path.join(distDir, 'manifest.json')
@@ -132,6 +146,7 @@ export async function createProdServer(options: ProdServerOptions): Promise<http
     '.map': 'application/json',
   }
 
+  /** Check if a URL targets a static asset (has a recognizable file extension other than .html). */
   function isAssetUrl(url: string): boolean {
     const ext = path.extname(url.split('?')[0])
     return !!ext && ext !== '.html'
@@ -149,6 +164,7 @@ export async function createProdServer(options: ProdServerOptions): Promise<http
 
     const url = req.url || '/'
 
+    // Try to serve static assets from dist/client before falling through to route matching.
     if (isAssetUrl(url)) {
       const rawPath = path.join(clientDir, url)
       const staticPath = path.resolve(rawPath)
@@ -181,9 +197,11 @@ export async function createProdServer(options: ProdServerOptions): Promise<http
       }
     }
 
+    // Execute middleware chain, then try API matching, page matching, and error page fallback.
     const middleware = config?.middleware || []
     try {
       await runMiddleware(middleware, req, res, async (req, res) => {
+        // API route: load the server entry and dispatch to the method handler.
         const apiMatch = matchRoute(url, routes.apis)
         if (apiMatch) {
           const safe = safeName(apiMatch.route.path, 'api')
@@ -207,6 +225,7 @@ export async function createProdServer(options: ProdServerOptions): Promise<http
           }
         }
 
+        // Page route: load server entry, execute load functions, render via adapter, serve HTML shell.
         const pageMatch = matchRoute(url, routes.pages)
         if (pageMatch) {
           const safe = safeName(pageMatch.route.path, 'index')
@@ -290,6 +309,7 @@ export async function createProdServer(options: ProdServerOptions): Promise<http
               })
               return
             } else if (typeof mod.default === 'function') {
+              // No adapter: use the page's default export as a simple render function.
               html = mod.default(loadData)
             } else {
               html = mod.render ? await mod.render(loadData) : '<div></div>'
@@ -325,11 +345,13 @@ export async function createProdServer(options: ProdServerOptions): Promise<http
     }
   })
 
+  // Pre-warm the HTML shell cache so the first request isn't penalized.
   try { loadHtmlShell(appShell) } catch { /* warm cache */ }
 
   return server
 }
 
+/** Render an error page using the custom _error component (if available) or the default fallback. */
 async function renderErrorPage(
   statusCode: number,
   statusMessage: string,

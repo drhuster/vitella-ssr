@@ -1,3 +1,9 @@
+/**
+ * Shell response sender — renders the HTML shell template, flushes cookies,
+ * optionally applies Vite's transformIndexHtml (for dev HMR), and sends
+ * the final HTML response with compression.
+ */
+
 import { IncomingMessage, ServerResponse } from 'http'
 import type { ViteDevServer } from 'vite'
 import { loadHtmlShell, renderHtmlShell } from './html-shell.js'
@@ -18,6 +24,7 @@ export interface ShellResponseOptions {
   vite?: ViteDevServer
 }
 
+/** Render the HTML shell, flush cookies, run Vite's index HTML transform (dev only), and send the response. */
 export async function sendShellResponse(options: ShellResponseOptions): Promise<void> {
   const { html, title, head, loadData, scripts, appShell, ctx, res, req, vite } = options
 

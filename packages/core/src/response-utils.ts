@@ -1,3 +1,12 @@
+/**
+ * HTTP response utilities for Vitella SSR.
+ *
+ * Provides compression (brotli/gzip/deflate), security headers,
+ * JSON/HTML response helpers, structured result detection, TTL
+ * sanitization, data merging (with prototype pollution protection),
+ * and filename-safe route name generation.
+ */
+
 import { IncomingMessage, ServerResponse } from 'http'
 import { promisify } from 'util'
 import { brotliCompress as brotliCompressCb, gzip as gzipCb, deflate as deflateCb } from 'zlib'
@@ -7,9 +16,12 @@ const brotliCompress = promisify(brotliCompressCb)
 const gzip = promisify(gzipCb)
 const deflate = promisify(deflateCb)
 
+/** Maximum allowed request body size: 10 MB. */
 export const MAX_BODY_SIZE = 10 * 1024 * 1024
+/** Maximum allowed TTL (Cache-Control max-age): 1 year in seconds. */
 export const MAX_TTL = 31536000
 
+/** Default security headers applied to all responses. */
 export const DEFAULT_SECURITY_HEADERS = {
   'X-Content-Type-Options': 'nosniff',
   'X-Frame-Options': 'DENY',
@@ -28,12 +40,14 @@ export const DEFAULT_SECURITY_HEADERS = {
   ].join('; '),
 }
 
+/** Apply security headers to a response, allowing user overrides for specific headers. */
 export function setSecurityHeaders(res: ServerResponse, overrides?: Record<string, string>): void {
   for (const [key, value] of Object.entries(DEFAULT_SECURITY_HEADERS)) {
     res.setHeader(key, overrides?.[key] ?? value)
   }
 }
 
+/** Compress a string response body using the client's preferred encoding (brotli > gzip > deflate > none). */
 export async function compressAndEnd(res: ServerResponse, data: string, contentType: string, req: IncomingMessage): Promise<void> {
   res.setHeader('Content-Type', contentType)
   const accept = req.headers['accept-encoding'] || ''
@@ -60,18 +74,22 @@ export async function compressAndEnd(res: ServerResponse, data: string, contentT
   }
 }
 
+/** Send a JSON response. */
 export async function sendJson(res: ServerResponse, data: unknown, req: IncomingMessage): Promise<void> {
   await compressAndEnd(res, JSON.stringify(data), 'application/json', req)
 }
 
+/** Send an HTML response. */
 export async function sendHtml(res: ServerResponse, html: string, req: IncomingMessage): Promise<void> {
   await compressAndEnd(res, html, 'text/html', req)
 }
 
+/** Type guard: check if an adapter render result is a structured object (with html/head/title) vs. a plain string. */
 export function isStructuredResult(result: unknown): result is AdapterRenderResult {
   return typeof result === 'object' && result !== null && typeof (result as AdapterRenderResult).html === 'string'
 }
 
+/** Validate and sanitize a TTL value: must be a finite positive number within MAX_TTL. */
 export function sanitizeTtl(ttl: unknown): number | undefined {
   if (typeof ttl === 'number' && Number.isFinite(ttl) && ttl > 0 && ttl <= MAX_TTL) {
     return Math.floor(ttl)
@@ -79,6 +97,11 @@ export function sanitizeTtl(ttl: unknown): number | undefined {
   return undefined
 }
 
+/**
+ * Merge data from a page/layout load() function into the target object.
+ * Skips 'ttl' (extracted separately), and blocks prototype pollution keys
+ * (__proto__, constructor, prototype). Returns the extracted ttl value.
+ */
 export function mergeLoadResult(
   result: Record<string, unknown> | undefined,
   target: Record<string, unknown>
@@ -96,6 +119,7 @@ export function mergeLoadResult(
   return pageTtl
 }
 
+/** Convert a route path to a filesystem-safe name (replace slashes and colons, remove leading underscore). */
 export function safeName(routePath: string, fallback: string): string {
   return routePath.replace(/\//g, '_').replace(/:/g, '_').replace(/^_/, '') || fallback
 }

@@ -1,6 +1,6 @@
 {
   "name": "@vitella-ssr/core",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Vitella's core library",
   "type": "module",
   "main": "./dist/index.js",

@@ -1,3 +1,9 @@
+/**
+ * Vue 3 SSR renderer — creates a Vue SSR app, renders it to a string,
+ * extracts head metadata (title, meta, link) from the SSR context,
+ * and returns either a plain HTML string or a structured result.
+ */
+
 import { createSSRApp, h } from 'vue'
 import { renderToString } from 'vue/server-renderer'
 import type { AdapterRenderResult } from '@vitella-ssr/core'
@@ -6,6 +12,7 @@ function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
+/** Render a Vue component to HTML via SSR, optionally wrapping it in a layout component. */
 export async function renderVueComponent(
   component: any,
   loadData: Record<string, unknown>,
