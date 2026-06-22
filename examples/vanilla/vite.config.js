@@ -7,8 +7,12 @@ export default defineConfig({
     adapter: {
       name: 'vanilla',
       extensions: ['.js', '.ts'],
-      render: async ({ component, loadData }) => {
-        return component(loadData)
+      render: async ({ component, loadData, layout }) => {
+        const html = component(loadData)
+        if (layout) {
+          return layout({ children: html, ...loadData })
+        }
+        return html
       },
     },
   })],

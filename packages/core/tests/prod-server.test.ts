@@ -589,7 +589,7 @@ describe('createProdServer with layout data merging', () => {
 export const load = async () => {
   return { layoutMsg: 'from-layout' }
 }
-export default function() { return '' }
+export default function({ children }) { return children || '' }
 `)
 
     writeFileSync(join(serverDir, 'hello.js'), `

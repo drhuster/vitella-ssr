@@ -311,6 +311,9 @@ export async function createProdServer(options: ProdServerOptions): Promise<http
             } else if (typeof mod.default === 'function') {
               // No adapter: use the page's default export as a simple render function.
               html = mod.default(loadData)
+              if (layoutComponent) {
+                html = layoutComponent({ children: html, ...loadData })
+              }
             } else {
               html = mod.render ? await mod.render(loadData) : '<div></div>'
             }
