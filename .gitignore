@@ -4,7 +4,7 @@ dist/
 .vite/
 .vitella/
 
-docs/
+docs/superpowers
 coverage/
 
 .DS_Store
