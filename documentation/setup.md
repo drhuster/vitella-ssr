@@ -1,6 +1,6 @@
 # Vitella SSR documentation
 
-A minimal, framework-agnostic server-side rendering framework built on Vite and Node built-in packages. Zero runtime dependencies beyond Vite. No Express, no Koa, no client-side router.
+A minimal, framework-agnostic server-side rendering framework built on Vite and Node built-in packages. Zero runtime dependencies beyond Vite. No Express, no Koa, no client-side router. This framework is not trying to do everything. It is simply trying to cover 90% of use cases, provide some useful development quality of life features and not relying on sub-depenencies. 
 
 ## Quick Start
 
