@@ -1,8 +1,6 @@
-<img 
-    style="display: block; 
-           margin-left: auto;
-           margin-right: auto;
-           width: 35%;" src="vitella-image.png" alt="Vitella"/>
+<div style="display:flex; margin-bottom: 16px; justify-content: center;">
+    <img  style="width: 35%;" src="vitella-image.png" alt="Vitella"/>
+</div>
 
 # Vitella SSR
 
