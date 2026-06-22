@@ -1,0 +1,33 @@
+{
+  "name": "@vitella-ssr/ejs",
+  "version": "0.1.4",
+  "description": "EJS templating adapter for Vitella SSR",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "license": "MIT",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "dev": "vitest"
+  },
+  "dependencies": {
+    "ejs": "^3.1.10"
+  },
+  "peerDependencies": {
+    "@vitella-ssr/core": "^0.1.0"
+  },
+  "devDependencies": {
+    "@vitella-ssr/core": "*",
+    "@types/ejs": "^3.1.5",
+    "vitest": "4.1.9",
+    "@types/node": "25.9.3"
+  }
+}

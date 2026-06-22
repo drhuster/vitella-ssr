@@ -235,12 +235,12 @@ export async function createProdServer(options: ProdServerOptions): Promise<http
             let html: string
 
             const entry = manifest.pages[pageMatch.route.path]
-            const loadData: Record<string, unknown> = {}
             let pageTtl: number | undefined = undefined
+            const ctx: RequestContext = parseRequestContext(req, pageMatch.params)
+            const loadData: Record<string, unknown> = { ...ctx.params }
 
             let layoutComponent: any = undefined
             const layoutPath = pageMatch.route.layout
-            const ctx: RequestContext = parseRequestContext(req, pageMatch.params)
             if (layoutPath) {
               const layoutSafe = safeName(layoutPath.replace(/\.[^/.]+$/, ''), '_layout')
               const layoutModPath = path.join(distDir, 'server', `${layoutSafe}.js`)

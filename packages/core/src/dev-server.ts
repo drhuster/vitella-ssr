@@ -148,9 +148,9 @@ async function handlePageRoute(
 ): Promise<void> {
   const { config } = state
   const mod = await vite.ssrLoadModule(route.filePath)
-  const loadData: Record<string, unknown> = {}
   let pageTtl: number | undefined = undefined
   const ctx: RequestContext = parseRequestContext(req, params)
+  const loadData: Record<string, unknown> = { ...ctx.params }
 
   // If the page has a layout, load it and execute its load() function first.
   let layoutComponent: any = undefined

@@ -101,14 +101,14 @@ async function main() {
       const { build } = await import('vite')
       const pagesDir = resolve(root, 'src/pages')
       const serverDir = resolve(root, 'src/server')
-      const routeManifest = buildRouteManifest(pagesDir, serverDir)
+      const adapter = await getAdapter()
+      const routeManifest = buildRouteManifest(pagesDir, serverDir, (adapter as any)?.extensions)
 
       // Generate adapter-based client hydration entries into a temp directory.
       const entriesDir = resolve(root, '.vitella', 'entries', 'pages')
       fs.mkdirSync(entriesDir, { recursive: true })
 
       const clientInputs: Record<string, string> = {}
-      const adapter = await getAdapter()
 
       if (adapter?.getClientEntry) {
         for (const page of routeManifest.pages) {
