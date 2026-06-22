@@ -1,17 +1,28 @@
-# @vitella-ssr/core
+<img 
+    style="display: block; 
+           margin-left: auto;
+           margin-right: auto;
+           width: 35%;" src="vitella-image.png" alt="Vitella"/>
 
-Server-side rendering framework for Vite. Provides the Vite plugin, dev/production servers, routing for pages and API routes, middleware chain, HTML shell rendering, and cookie management.
+# Vitella SSR
 
-```ts
-// vitella.config.ts
-import { vitellaPlugin } from '@vitella-ssr/core'
+A minimal, framework-agnostic server-side rendering framework built on Vite and Node built-in packages. Zero runtime dependencies beyond Vite. No Express, no Koa, no client-side router.
 
-export default {
-  plugins: [vitellaPlugin({
-    appShell: 'src/app.html',
-    adapter: myAdapter,          // e.g. vueAdapter from @vitella-ssr/vue
-  })],
-}
-```
+## Quick Start
+Check out the documentation for a [quick start](/setup.md)
 
-Pages go in `src/pages/` and API routes in `src/server/`. The CLI (`vitella dev`, `vitella build`, `vitella start`) handles the rest.
+## Vitella adapters
+Vitella Core is framework-agnostic — it handles routing, middleware, the HTML shell, and server management. **Adapters** bridge the gap between Vitella Core and your chosen UI framework (Vue, React, Lit, Svelte, etc.).
+
+Currently there are 2 Vitella supported adapters
+* @vitella-ssr/vue - to support SSR Vue
+* @vitella-ssr/pinia - to support state store via pinia for vue
+
+If you want to write your own adapter, you can follow the instructions [here](/creating-adapters.md).
+
+## Why Vitella?
+It is a play on Vite and Vanilla. Specificically, this is a vanilla framework with minimal dependencies - specifically one main dependency in Vite. 
+
+In the wake of supply chain attacks, the thought was to have a simple SSR framework that would use as few depenencies as possible while still trying to achieve some developer friendliness. 
+
+(Vitella also happens to [mean a young cow](https://dictionary.cambridge.org/us/dictionary/italian-english/vitella) - hence the image)
