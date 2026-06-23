@@ -1,0 +1,14 @@
+{
+  "name": "create-vitella-ssr",
+  "version": "0.1.0",
+  "description": "Scaffold a new Vitella SSR project",
+  "type": "module",
+  "bin": {
+    "create-vitella-ssr": "./bin/index.js"
+  },
+  "files": ["bin", "src", "templates"],
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  }
+}
