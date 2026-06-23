@@ -1,6 +1,6 @@
 import { createInterface } from 'readline/promises'
-import { existsSync, mkdirSync, cpSync, readdirSync, readFileSync, writeFileSync } from 'fs'
-import { join, dirname } from 'path'
+import { existsSync, mkdirSync, cpSync, readdirSync, readFileSync, writeFileSync, statSync } from 'fs'
+import { join, dirname, resolve } from 'path'
 import { fileURLToPath } from 'url'
 import { execSync } from 'child_process'
 
@@ -40,8 +40,6 @@ function validateProjectName(name) {
 }
 
 export async function main() {
-  let targetDir = process.argv[2] || '.'
-
   const rl = createInterface({ input: process.stdin, output: process.stdout })
 
   try {
@@ -53,16 +51,19 @@ export async function main() {
       throw new Error(`Unknown framework "${framework}". Choose "vue" or "vanilla".`)
     }
 
-    rl.close()
-
-    const destDir = targetDir === '.' ? join(process.cwd(), projectName) : join(process.cwd(), targetDir)
+    const rawTarget = process.argv[2]
+    const destDir = rawTarget ? resolve(rawTarget) : join(process.cwd(), projectName)
 
     if (existsSync(destDir)) {
       throw new Error(`Directory "${destDir}" already exists.`)
     }
 
-    mkdirSync(destDir, { recursive: true })
     const templateDir = join(TEMPLATES_DIR, framework)
+    if (!existsSync(templateDir) || !statSync(templateDir).isDirectory()) {
+      throw new Error(`Template "${framework}" not found at ${templateDir}.`)
+    }
+
+    mkdirSync(destDir, { recursive: true })
     copyAndSubstitute(templateDir, destDir, { name: projectName })
 
     console.log(`\nScaffolding project in ${destDir}...`)

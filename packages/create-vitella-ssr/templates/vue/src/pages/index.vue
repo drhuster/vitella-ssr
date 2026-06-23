@@ -6,7 +6,7 @@ export const load = async () => {
 
 <template>
   <main>
-    <h1>{{ name }}</h1>
+    <h1>Vitella SSR</h1>
     <p>{{ message }}</p>
     <nav>
       <a href="/about">About</a>
@@ -15,5 +15,5 @@ export const load = async () => {
 </template>
 
 <script setup>
-defineProps(['name', 'message'])
+defineProps(['message'])
 </script>
