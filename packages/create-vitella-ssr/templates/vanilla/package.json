@@ -1,0 +1,17 @@
+{
+  "name": "{{name}}",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vitella dev",
+    "build": "vitella build",
+    "start": "vitella start"
+  },
+  "dependencies": {
+    "@vitella-ssr/core": "^0.1.0"
+  },
+  "devDependencies": {
+    "vite": "^8.0.0"
+  }
+}
