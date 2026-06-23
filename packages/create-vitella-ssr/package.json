@@ -7,6 +7,9 @@
     "create-vitella-ssr": "./bin/index.js"
   },
   "files": ["bin", "src", "templates"],
+  "scripts": {
+    "test": "vitest run"
+  },
   "license": "MIT",
   "engines": {
     "node": ">=20"

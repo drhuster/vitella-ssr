@@ -6,6 +6,7 @@ export default defineConfig({
       'packages/core/vitest.config.ts',
       'packages/vue/vitest.config.ts',
       'packages/pinia/vitest.config.ts',
+      'packages/create-vitella-ssr/vitest.config.js',
     ],
   },
 })

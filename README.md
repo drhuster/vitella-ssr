@@ -9,16 +9,23 @@
 A minimal, framework-agnostic server-side rendering framework built on Vite and Node built-in packages. Zero runtime dependencies beyond Vite. No Express, no Koa, no client-side router.
 
 ## Quick Start
-Check out the documentation for a [quick start](/docs/setup.md)
+
+```bash
+npm create vitella-ssr
+cd my-project
+npm run dev
+```
+
+See the [Getting Started guide](/docs/getting-started.md) for details.
 
 ## Vitella adapters
 Vitella Core is framework-agnostic — it handles routing, middleware, the HTML shell, and server management. **Adapters** bridge the gap between Vitella Core and your chosen UI framework (Vue, React, Lit, Svelte, etc.).
 
-Currently there are 2 Vitella supported adapters
-* @vitella-ssr/vue - to support SSR Vue
-* @vitella-ssr/pinia - to support state store via pinia for vue
+Currently there are 2 built-in adapters:
+* [@vitella-ssr/vue](/docs/adapters.md) — SSR for Vue 3
+* [@vitella-ssr/pinia](/docs/adapters.md) — Pinia store SSR for Vue
 
-If you want to write your own adapter, you can follow the instructions [here](/docs/creating-adapters.md).
+If you want to write your own adapter, follow the [Creating Adapters](/docs/creating-adapters.md) guide.
 
 ## Why Vitella?
 It is a play on Vite and Vanilla. Specificically, this is a vanilla framework with minimal dependencies - specifically one main dependency in Vite. 

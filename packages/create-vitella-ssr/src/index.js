@@ -5,13 +5,13 @@ import { fileURLToPath } from 'url'
 import { execSync } from 'child_process'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
-const TEMPLATES_DIR = join(__dirname, '..', 'templates')
+export const TEMPLATES_DIR = join(__dirname, '..', 'templates')
 
-function prompt(rl, question, defaultValue) {
-  return rl.question(`${question} `).then(answer => answer.trim() || defaultValue)
+export async function prompt(rl, question, defaultValue) {
+  return (await rl.question(`${question} `)).trim() || defaultValue
 }
 
-function copyAndSubstitute(srcDir, destDir, vars) {
+export function copyAndSubstitute(srcDir, destDir, vars) {
   cpSync(srcDir, destDir, { recursive: true })
 
   function substitute(dir) {
@@ -33,25 +33,31 @@ function copyAndSubstitute(srcDir, destDir, vars) {
   substitute(destDir)
 }
 
-function validateProjectName(name) {
+export function validateProjectName(name) {
   if (!/^[a-z0-9-._]+$/i.test(name)) {
     throw new Error(`Invalid project name "${name}". Use letters, digits, hyphens, dots, or underscores.`)
   }
 }
 
-export async function main() {
-  const rl = createInterface({ input: process.stdin, output: process.stdout })
+export async function main(opts = {}) {
+  const { prompt: promptFn, argv = process.argv, runInstall = execSync } = opts
+
+  let rl
+  const ask = promptFn || (async (question, defaultValue) => {
+    rl = rl || createInterface({ input: process.stdin, output: process.stdout })
+    return prompt(rl, question, defaultValue)
+  })
 
   try {
-    const projectName = await prompt(rl, 'Project name:', 'my-vitella-app')
+    const projectName = await ask('Project name:', 'my-vitella-app')
     validateProjectName(projectName)
 
-    const framework = await prompt(rl, 'Framework (vue/vanilla):', 'vue')
+    const framework = await ask('Framework (vue/vanilla):', 'vue')
     if (framework !== 'vue' && framework !== 'vanilla') {
       throw new Error(`Unknown framework "${framework}". Choose "vue" or "vanilla".`)
     }
 
-    const rawTarget = process.argv[2]
+    const rawTarget = argv[2]
     const destDir = rawTarget ? resolve(rawTarget) : join(process.cwd(), projectName)
 
     if (existsSync(destDir)) {
@@ -66,13 +72,8 @@ export async function main() {
     mkdirSync(destDir, { recursive: true })
     copyAndSubstitute(templateDir, destDir, { name: projectName })
 
-    console.log(`\nScaffolding project in ${destDir}...`)
-    execSync('npm install', { cwd: destDir, stdio: 'inherit' })
-
-    console.log(`\nDone! 🎉\n`)
-    console.log(`  cd ${projectName}`)
-    console.log(`  npm run dev`)
+    runInstall('npm install', { cwd: destDir, stdio: 'inherit' })
   } finally {
-    rl.close()
+    if (rl) rl.close()
   }
 }
