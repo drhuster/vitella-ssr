@@ -1,6 +1,6 @@
 import { createInterface } from 'readline/promises'
 import { existsSync, mkdirSync, cpSync, readdirSync, readFileSync, writeFileSync, statSync } from 'fs'
-import { join, dirname, resolve } from 'path'
+import { join, dirname } from 'path'
 import { fileURLToPath } from 'url'
 import { execSync } from 'child_process'
 
@@ -40,7 +40,7 @@ export function validateProjectName(name) {
 }
 
 export async function main(opts = {}) {
-  const { prompt: promptFn, argv = process.argv, runInstall = execSync } = opts
+  const { prompt: promptFn, argv = process.argv, runInstall = execSync, cwd = process.cwd() } = opts
 
   let rl
   const ask = promptFn || (async (question, defaultValue) => {
@@ -49,7 +49,8 @@ export async function main(opts = {}) {
   })
 
   try {
-    const projectName = await ask('Project name:', 'my-vitella-app')
+    const defaultName = argv[2] || 'my-vitella-app'
+    const projectName = await ask('Project name:', defaultName)
     validateProjectName(projectName)
 
     const framework = await ask('Framework (vue/vanilla):', 'vue')
@@ -57,8 +58,7 @@ export async function main(opts = {}) {
       throw new Error(`Unknown framework "${framework}". Choose "vue" or "vanilla".`)
     }
 
-    const rawTarget = argv[2]
-    const destDir = rawTarget ? resolve(rawTarget) : join(process.cwd(), projectName)
+    const destDir = join(cwd, projectName)
 
     if (existsSync(destDir)) {
       throw new Error(`Directory "${destDir}" already exists.`)

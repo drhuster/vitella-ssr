@@ -355,7 +355,7 @@ describe('scaffolding Vue template (integration)', () => {
     expect(pkg.dependencies['@vitella-ssr/core']).toBe('^0.1.0')
     expect(pkg.dependencies['@vitella-ssr/vue']).toBe('^0.1.0')
     expect(pkg.dependencies.vue).toBe('^3.5.0')
-    expect(pkg.devDependencies['@vitejs/plugin-vue']).toBe('^5.0.0')
+    expect(pkg.devDependencies['@vitejs/plugin-vue']).toBe('^6.0.0')
     expect(pkg.devDependencies.vite).toBe('^8.0.0')
   })
 
@@ -466,7 +466,8 @@ describe('main', () => {
 
     await main({
       prompt: mockPrompt,
-      argv: [null, null, dest],
+      argv: [null, null, 'scaffolded-vue-main'],
+      cwd: tmpDir,
       runInstall: noopInstall,
     })
 
@@ -485,7 +486,8 @@ describe('main', () => {
 
     await main({
       prompt: mockPrompt,
-      argv: [null, null, dest],
+      argv: [null, null, 'custom-name-main'],
+      cwd: tmpDir,
       runInstall: noopInstall,
     })
 
@@ -494,21 +496,22 @@ describe('main', () => {
     expect(existsSync(join(dest, 'src/pages/index.js'))).toBe(true)
   })
 
-  it('uses argv[2] as the target directory', async () => {
-    const customDest = join(tmpDir, 'argv-target-dir')
+  it('uses argv[2] as default project name when not overridden by prompt', async () => {
+    const dest = join(tmpDir, 'argv-default-name')
     const mockPrompt = async (q, d) => {
-      if (q.includes('Project name:')) return 'some-app'
       if (q.includes('Framework')) return 'vue'
       return d
     }
 
     await main({
       prompt: mockPrompt,
-      argv: [null, null, customDest],
+      argv: [null, null, 'argv-default-name'],
+      cwd: tmpDir,
       runInstall: noopInstall,
     })
 
-    expect(existsSync(join(customDest, 'package.json'))).toBe(true)
+    const pkg = JSON.parse(readFileSync(join(dest, 'package.json'), 'utf-8'))
+    expect(pkg.name).toBe('argv-default-name')
   })
 
   it('throws for invalid project name', async () => {
@@ -520,7 +523,8 @@ describe('main', () => {
 
     await expect(main({
       prompt: mockPrompt,
-      argv: [null, null, join(tmpDir, 'ignored')],
+      argv: [null, null, 'ignored'],
+      cwd: tmpDir,
       runInstall: noopInstall,
     })).rejects.toThrow(/Invalid project name/)
   })
@@ -534,24 +538,26 @@ describe('main', () => {
 
     await expect(main({
       prompt: mockPrompt,
-      argv: [null, null, join(tmpDir, 'ignored')],
+      argv: [null, null, 'my-app'],
+      cwd: tmpDir,
       runInstall: noopInstall,
     })).rejects.toThrow(/Unknown framework/)
   })
 
   it('throws if target directory already exists', async () => {
-    const existingDest = join(tmpDir, 'existing-dir')
-    mkdirSync(existingDest, { recursive: true })
+    const projectName = 'existing-dir'
+    mkdirSync(join(tmpDir, projectName), { recursive: true })
 
     const mockPrompt = async (q, d) => {
-      if (q.includes('Project name:')) return 'my-app'
+      if (q.includes('Project name:')) return projectName
       if (q.includes('Framework')) return 'vue'
       return d
     }
 
     await expect(main({
       prompt: mockPrompt,
-      argv: [null, null, existingDest],
+      argv: [null, null, projectName],
+      cwd: tmpDir,
       runInstall: noopInstall,
     })).rejects.toThrow(/already exists/)
   })
